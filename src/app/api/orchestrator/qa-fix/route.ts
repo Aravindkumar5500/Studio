@@ -5,6 +5,7 @@ import { qaAgent } from "@/lib/ai/agents";
 import { runAgent } from "@/lib/ai/run-agent";
 import { applyPatchOperations } from "@/lib/patch/apply-diff";
 import { stampStudioIds } from "@/lib/patch/studio-id";
+import { repairSourceCode } from "@/modules/code-integrity";
 import { extractExportSignatures } from "@/lib/vfs/analyze";
 import { errorResponse } from "@/lib/api/errors";
 import { requireProjectAccess } from "@/lib/firebase/auth-guard";
@@ -26,6 +27,36 @@ export async function POST(request: Request) {
     const affected = new Set(body.diagnostics.map((d) => d.filePath));
     const files: Record<string, string> = {};
     for (const file of body.files) files[file.filePath] = file.content;
+
+    // Fast-path: Check if deterministic AST repair directly resolves the diagnostics in 0ms
+    const fastRepairedFiles: { filePath: string; content: string }[] = [];
+    let fastRepairedAny = false;
+
+    for (const filePath of affected) {
+      const origContent = files[filePath];
+      if (origContent && /\.(tsx|jsx)$/.test(filePath)) {
+        const outcome = repairSourceCode(filePath, origContent);
+        if (outcome.repaired && outcome.valid) {
+          fastRepairedFiles.push({
+            filePath,
+            content: stampStudioIds(filePath, outcome.content),
+          });
+          fastRepairedAny = true;
+        }
+      }
+    }
+
+    if (fastRepairedAny && fastRepairedFiles.length === affected.size) {
+      return NextResponse.json({
+        ok: true,
+        healed: true,
+        diagnosis: "Automated AST import and client directive self-healing applied",
+        confidence: 1.0,
+        files: fastRepairedFiles,
+        changedPaths: fastRepairedFiles.map((f) => f.filePath),
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 },
+      });
+    }
 
     const fileBlocks = body.files
       .filter((file) => affected.has(file.filePath))
@@ -74,12 +105,17 @@ export async function POST(request: Request) {
       );
     }
 
-    const outFiles = result.changedPaths.map((filePath) => ({
-      filePath,
-      content: /\.(tsx|jsx)$/.test(filePath)
-        ? stampStudioIds(filePath, result.files[filePath])
-        : result.files[filePath],
-    }));
+    const outFiles = result.changedPaths.map((filePath) => {
+      let content = result.files[filePath];
+      if (/\.(tsx|jsx)$/.test(filePath)) {
+        const integrity = repairSourceCode(filePath, content);
+        content = stampStudioIds(filePath, integrity.content);
+      }
+      return {
+        filePath,
+        content,
+      };
+    });
 
     return NextResponse.json({
       ok: true,

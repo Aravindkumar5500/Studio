@@ -5,6 +5,7 @@ import { chatPatchAgent } from "@/lib/ai/agents";
 import { runAgent } from "@/lib/ai/run-agent";
 import { applyPatchOperations, checkJsxBalance } from "@/lib/patch/apply-diff";
 import { stampStudioIds } from "@/lib/patch/studio-id";
+import { repairSourceCode } from "@/modules/code-integrity";
 import { errorResponse } from "@/lib/api/errors";
 import { selectRelevantFiles } from "@/lib/ai/select-files";
 import { requireProjectAccess } from "@/lib/firebase/auth-guard";
@@ -91,12 +92,17 @@ export async function POST(request: Request) {
       );
     }
 
-    const outFiles = Array.from(changed).map((filePath) => ({
-      filePath,
-      content: /\.(tsx|jsx)$/.test(filePath)
-        ? stampStudioIds(filePath, nextFiles[filePath])
-        : nextFiles[filePath],
-    }));
+    const outFiles = Array.from(changed).map((filePath) => {
+      let raw = nextFiles[filePath];
+      if (/\.(tsx|jsx)$/.test(filePath)) {
+        const healed = repairSourceCode(filePath, raw);
+        raw = healed.content;
+      }
+      return {
+        filePath,
+        content: /\.(tsx|jsx)$/.test(filePath) ? stampStudioIds(filePath, raw) : raw,
+      };
+    });
 
     return NextResponse.json({
       ok: true,

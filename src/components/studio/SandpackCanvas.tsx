@@ -8,6 +8,8 @@ import {
   type SandpackPreviewRef,
 } from "@codesandbox/sandpack-react";
 import {
+  AlertTriangle,
+  Code2,
   ExternalLink,
   Laptop,
   Maximize2,
@@ -18,7 +20,9 @@ import {
   RotateCcw,
   ShieldCheck,
   Smartphone,
+  Sparkles,
   Tablet,
+  X,
 } from "lucide-react";
 import { useStudio } from "@/store/studio-store";
 import { buildSandpackFiles } from "@/lib/sandpack/build-files";
@@ -50,14 +54,33 @@ export function SandpackCanvas() {
     iframe?.contentWindow?.postMessage({ source: "studio-shell", ...message }, "*");
   }, []);
 
-  // Receive selections from inside the preview iframe.
+  // Receive selections & runtime diagnostics from inside the preview iframe.
   React.useEffect(() => {
     function onMessage(event: MessageEvent) {
       if (!isInspectorMessage(event.data)) return;
       if (event.data.type === "ready") {
         setReady(true);
+        studio.dispatch({ type: "setPreviewStatus", status: "ready" });
         postToPreview({ type: "set-inspect", enabled: studio.inspectEnabled });
         postToPreview({ type: "set-theme", colors: studio.designSystem.colors });
+        return;
+      }
+      if (event.data.type === "runtime-error") {
+        studio.dispatch({ type: "setPreviewStatus", status: "runtime_error" });
+        studio.dispatch({
+          type: "addDiagnostic",
+          diagnostic: {
+            id: event.data.diagnostic.id,
+            projectId: studio.projectId,
+            filePath: event.data.diagnostic.filePath,
+            line: event.data.diagnostic.line,
+            column: event.data.diagnostic.column,
+            message: event.data.diagnostic.message,
+            stack: event.data.diagnostic.stack,
+            severity: event.data.diagnostic.severity,
+            timestamp: event.data.diagnostic.timestamp,
+          },
+        });
         return;
       }
       studio.selectElement(event.data.studioId);
@@ -65,6 +88,53 @@ export function SandpackCanvas() {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [postToPreview, studio]);
+
+  // Listen for Sandpack bundler compilation events
+  React.useEffect(() => {
+    const client = previewRef.current?.getClient();
+    if (!client) return;
+
+    const unsubscribe = client.listen((msg) => {
+      if (msg.type === "status") {
+        if (
+          msg.status === "initializing" ||
+          msg.status === "installing-dependencies" ||
+          msg.status === "transpiling" ||
+          msg.status === "evaluating"
+        ) {
+          studio.dispatch({ type: "setPreviewStatus", status: "starting" });
+        } else if ((msg.status === "idle" || msg.status === "done") && studio.previewStatus !== "runtime_error") {
+          studio.dispatch({ type: "setPreviewStatus", status: "ready" });
+        }
+      }
+      if (
+        msg.type === "action" &&
+        msg.action === "notification" &&
+        (msg as { notificationType?: string }).notificationType === "error"
+      ) {
+        const errorMsg =
+          (msg as { message?: string }).message ||
+          (msg as { title?: string }).title ||
+          "Sandpack compilation error";
+        studio.dispatch({ type: "setPreviewStatus", status: "build_error" });
+        studio.dispatch({
+          type: "addDiagnostic",
+          diagnostic: {
+            id: `diag_build_${Date.now()}`,
+            projectId: studio.projectId,
+            filePath: (msg as { path?: string }).path || "src/app/page.tsx",
+            message: errorMsg,
+            severity: "error",
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [ready, studio]);
 
   React.useEffect(() => {
     if (ready) postToPreview({ type: "set-inspect", enabled: studio.inspectEnabled });
@@ -253,10 +323,28 @@ export function SandpackCanvas() {
             {/* Live Indicator & Open in New Tab */}
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="font-mono text-[9px] text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
-                  LIVE
-                </span>
+                {studio.previewStatus === "ready" ? (
+                  <>
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="font-mono text-[9px] text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                      LIVE
+                    </span>
+                  </>
+                ) : studio.previewStatus === "starting" ? (
+                  <>
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    <span className="font-mono text-[9px] text-amber-300 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                      COMPILING
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+                    <span className="font-mono text-[9px] text-red-300 font-bold bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20">
+                      {studio.previewStatus === "build_error" ? "BUILD ERROR" : "RUNTIME ERROR"}
+                    </span>
+                  </>
+                )}
               </div>
               <button
                 type="button"
@@ -270,6 +358,72 @@ export function SandpackCanvas() {
             </div>
           </div>
 
+          {/* Professional Self-Healing Error Overlay */}
+          {(studio.previewStatus === "runtime_error" || studio.previewStatus === "build_error") &&
+            studio.activeDiagnostics.length > 0 && (
+              <div className="absolute inset-x-4 top-14 z-30 rounded-xl border border-red-500/40 bg-zinc-950/95 p-4 shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-lg bg-red-500/20 p-2 text-red-400 border border-red-500/30">
+                      <AlertTriangle className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm text-red-200">
+                          {studio.previewStatus === "build_error"
+                            ? "Preview Compilation Failed"
+                            : "Application Runtime Error"}
+                        </span>
+                        {studio.activeDiagnostics[0].filePath && (
+                          <span className="rounded bg-zinc-800 px-2 py-0.5 font-mono text-[11px] text-zinc-300">
+                            {studio.activeDiagnostics[0].filePath}
+                            {studio.activeDiagnostics[0].line ? `:${studio.activeDiagnostics[0].line}` : ""}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-300 font-mono line-clamp-2">
+                        {studio.activeDiagnostics[0].message}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => studio.triggerQaRepair(studio.activeDiagnostics[0])}
+                      disabled={studio.busy}
+                      className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-md hover:bg-emerald-500 disabled:opacity-50 transition-all"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>{studio.busy ? "Healing..." : "Self-Heal with AI"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const file = studio.activeDiagnostics[0].filePath || "src/app/page.tsx";
+                        studio.openFile(file.replace(/^\//, ""));
+                      }}
+                      className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-700 transition-all"
+                    >
+                      <Code2 className="h-3.5 w-3.5 text-zinc-400" />
+                      <span>View Code</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        studio.dispatch({ type: "clearDiagnostics" });
+                        studio.dispatch({ type: "setPreviewStatus", status: "ready" });
+                      }}
+                      className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                      title="Dismiss"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
           {/* Sandpack Preview Container */}
           <div
             className="flex-1 overflow-hidden min-h-0 transition-colors duration-300"
@@ -279,6 +433,13 @@ export function SandpackCanvas() {
               template="react-ts"
               theme="dark"
               files={sandpackFiles}
+              customSetup={{
+                dependencies: {
+                  "lucide-react": "^0.344.0",
+                  clsx: "^2.1.0",
+                  "tailwind-merge": "^2.2.1",
+                },
+              }}
               options={{ recompileMode: "delayed", recompileDelay: 300 }}
             >
               <SandpackLayout className="!h-full !border-0 !bg-transparent">

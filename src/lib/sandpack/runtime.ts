@@ -241,6 +241,56 @@ export const INSPECTOR_RUNTIME = String.raw`
     }
   });
 
+  // Capture runtime exceptions & unhandled promise rejections inside the preview iframe
+  window.addEventListener("error", function (event) {
+    try {
+      var file = event.filename || "";
+      var message = event.message || "Unknown runtime error";
+      var line = event.lineno || 0;
+      var col = event.colno || 0;
+      var stack = (event.error && event.error.stack) || "";
+      parent.postMessage(
+        {
+          source: "studio-inspector",
+          type: "runtime-error",
+          diagnostic: {
+            id: "diag_runtime_" + Date.now(),
+            message: message,
+            filePath: file,
+            line: line,
+            column: col,
+            stack: stack,
+            severity: "error",
+            timestamp: new Date().toISOString()
+          }
+        },
+        "*"
+      );
+    } catch (e) {}
+  });
+
+  window.addEventListener("unhandledrejection", function (event) {
+    try {
+      var reason = event.reason;
+      var msg = (reason && (reason.message || String(reason))) || "Unhandled Promise Rejection";
+      var stack = (reason && reason.stack) || "";
+      parent.postMessage(
+        {
+          source: "studio-inspector",
+          type: "runtime-error",
+          diagnostic: {
+            id: "diag_rejection_" + Date.now(),
+            message: msg,
+            stack: stack,
+            severity: "error",
+            timestamp: new Date().toISOString()
+          }
+        },
+        "*"
+      );
+    } catch (e) {}
+  });
+
   window.__studioInspector = true;
   parent.postMessage({ source: "studio-inspector", type: "ready" }, "*");
 })();
@@ -258,7 +308,25 @@ export interface InspectorReadyMessage {
   type: "ready";
 }
 
-export type InspectorMessage = InspectorSelectMessage | InspectorReadyMessage;
+export interface InspectorErrorMessage {
+  source: "studio-inspector";
+  type: "runtime-error";
+  diagnostic: {
+    id: string;
+    message: string;
+    filePath?: string;
+    line?: number;
+    column?: number;
+    stack?: string;
+    severity: "error" | "warning";
+    timestamp: string;
+  };
+}
+
+export type InspectorMessage =
+  | InspectorSelectMessage
+  | InspectorReadyMessage
+  | InspectorErrorMessage;
 
 export function isInspectorMessage(value: unknown): value is InspectorMessage {
   return (

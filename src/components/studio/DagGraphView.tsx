@@ -17,6 +17,8 @@ const STATUS_COLOR: Record<TaskStatus, { border: string; dot: string }> = {
   pending: { border: "#334155", dot: "#475569" },
   awaiting_approval: { border: "#b45309", dot: "#f59e0b" },
   running: { border: "#4f46e5", dot: "#6366f1" },
+  validating: { border: "#0284c7", dot: "#38bdf8" },
+  repairing: { border: "#d97706", dot: "#fbbf24" },
   succeeded: { border: "#047857", dot: "#10b981" },
   failed: { border: "#b91c1c", dot: "#ef4444" },
   skipped: { border: "#334155", dot: "#334155" },

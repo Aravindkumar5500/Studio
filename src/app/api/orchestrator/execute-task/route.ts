@@ -6,6 +6,7 @@ import { runAgent } from "@/lib/ai/run-agent";
 import { sliceContext } from "@/lib/ai/token-slicer";
 import { stampStudioIds } from "@/lib/patch/studio-id";
 import { extractExportSignatures, extractImports, verifyExportContract } from "@/lib/vfs/analyze";
+import { repairSourceCode, validateSourceCode } from "@/modules/code-integrity";
 import { sha256Sync } from "@/lib/hash";
 import { byteSize } from "@/lib/utils";
 import { MAX_FILE_BYTES } from "@/types/firestore";
@@ -50,9 +51,33 @@ export async function POST(request: Request) {
     });
 
     const filePath = task.targetFilePath;
+    const rawContent = generated.data.file.content;
+
+    // Phase 1 Code Integrity: Auto-heal missing React hooks, "use client", and icons
+    const { content: healedContent, fixesApplied } = repairSourceCode(filePath, rawContent);
+    if (fixesApplied.length > 0) {
+      console.log(`[Code Integrity] Auto-healed ${filePath}: ${fixesApplied.join("; ")}`);
+    }
+
+    const validation = validateSourceCode(filePath, healedContent);
+    if (!validation.valid) {
+      const errorMsg = validation.diagnostics
+        .filter((d) => d.severity === "error")
+        .map((d) => `line ${d.line}: ${d.message}`)
+        .join("; ");
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Generated code failed integrity validation: ${errorMsg}`,
+          diagnostics: validation.diagnostics,
+        },
+        { status: 422 },
+      );
+    }
+
     const content = /\.(tsx|jsx)$/.test(filePath)
-      ? stampStudioIds(filePath, generated.data.file.content)
-      : generated.data.file.content;
+      ? stampStudioIds(filePath, healedContent)
+      : healedContent;
 
     // The DAG promised these exports to downstream tasks; verify before writing.
     const signatures = extractExportSignatures(content);

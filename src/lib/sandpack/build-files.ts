@@ -1,5 +1,6 @@
 import { INSPECTOR_RUNTIME } from "./runtime";
 import { stampStudioIds } from "@/lib/patch/studio-id";
+import { repairSourceCode } from "@/modules/code-integrity";
 
 /**
  * Converts the Next.js App Router VFS into a bundle the Sandpack react-ts
@@ -16,8 +17,12 @@ export function buildSandpackFiles(
     if (path === "package.json" || path.endsWith(".config.ts") || path.endsWith(".config.mjs")) {
       continue;
     }
-    const codeWithIds = /\.(tsx|jsx)$/.test(path) ? stampStudioIds(path, content) : content;
-    out[`/${path}`] = { code: rewriteAliases(codeWithIds, path) };
+    let processed = content;
+    if (/\.(tsx|jsx)$/.test(path)) {
+      const integrity = repairSourceCode(path, content);
+      processed = stampStudioIds(path, integrity.content);
+    }
+    out[`/${path}`] = { code: rewriteAliases(processed, path) };
   }
 
   for (const [path, code] of Object.entries(SANDPACK_SHIMS)) {

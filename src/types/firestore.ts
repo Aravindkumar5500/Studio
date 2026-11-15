@@ -20,6 +20,8 @@ export type TaskStatus =
   | "pending"
   | "awaiting_approval"
   | "running"
+  | "validating"
+  | "repairing"
   | "succeeded"
   | "failed"
   | "skipped";

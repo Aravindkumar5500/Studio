@@ -20,6 +20,8 @@ import type { SelectedElementInfo } from "@/lib/patch/ast-patch";
 import { getDb, getFirebaseAuth, isFirebaseConfigured } from "@/lib/firebase/client";
 import { authenticatedFetch } from "@/lib/firebase/auth-client";
 import { deleteFile as deleteFileDoc, loadProjectFiles, persistFile, persistFiles } from "@/lib/vfs/store";
+import type { PreviewStatus, RuntimeDiagnostic } from "@/modules/code-integrity";
+import { repairSourceCode } from "@/modules/code-integrity";
 
 export interface StudioState {
   projectId: string;
@@ -42,6 +44,8 @@ export interface StudioState {
   busy: boolean;
   error: string | null;
   persistence: "firestore" | "memory";
+  previewStatus: PreviewStatus;
+  activeDiagnostics: RuntimeDiagnostic[];
 }
 
 type Action =
@@ -67,7 +71,10 @@ type Action =
   | { type: "setSaveState"; saveState: StudioState["saveState"] }
   | { type: "setBusy"; busy: boolean }
   | { type: "setError"; error: string | null }
-  | { type: "setProjectName"; name: string };
+  | { type: "setProjectName"; name: string }
+  | { type: "setPreviewStatus"; status: PreviewStatus }
+  | { type: "addDiagnostic"; diagnostic: RuntimeDiagnostic }
+  | { type: "clearDiagnostics" };
 
 function reducer(state: StudioState, action: Action): StudioState {
   switch (action.type) {
@@ -152,6 +159,15 @@ function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, error: action.error };
     case "setProjectName":
       return { ...state, projectName: action.name };
+    case "setPreviewStatus":
+      return { ...state, previewStatus: action.status };
+    case "addDiagnostic":
+      return {
+        ...state,
+        activeDiagnostics: [action.diagnostic, ...state.activeDiagnostics.filter((d) => d.id !== action.diagnostic.id)].slice(0, 5),
+      };
+    case "clearDiagnostics":
+      return { ...state, activeDiagnostics: [] };
     default:
       return state;
   }
@@ -212,6 +228,8 @@ function initialState(projectId: string): StudioState {
     busy: false,
     error: null,
     persistence: "memory",
+    previewStatus: "ready",
+    activeDiagnostics: [],
   };
 }
 
@@ -222,6 +240,7 @@ export interface StudioApi extends StudioState {
   removeFile: (filePath: string) => void;
   openFile: (filePath: string) => void;
   selectElement: (studioId: string | null) => void;
+  triggerQaRepair: (diagnostic?: RuntimeDiagnostic) => Promise<boolean>;
   applyVisualMutation: (
     mutation:
       | { kind: "setText"; value: string }
@@ -811,6 +830,91 @@ export function StudioProvider({
     }
   }, [createCheckpoint, projectId, writeFile]);
 
+  const triggerQaRepair = React.useCallback(
+    async (diagnostic?: RuntimeDiagnostic): Promise<boolean> => {
+      const diag = diagnostic || stateRef.current.activeDiagnostics[0];
+      if (!diag) return false;
+
+      dispatch({ type: "setBusy", busy: true });
+      dispatch({ type: "setError", error: null });
+
+      const targetPath = diag.filePath
+        ? normalizePath(diag.filePath.replace(/^\//, ""))
+        : stateRef.current.activeFilePath || "src/app/page.tsx";
+
+      try {
+        const response = await authenticatedFetch("/api/orchestrator/qa-fix", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId,
+            diagnostics: [
+              {
+                filePath: targetPath,
+                message: diag.message,
+                severity: diag.severity || "error",
+                line: diag.line || 1,
+              },
+            ],
+            files: Object.values(stateRef.current.files).map((f) => ({
+              filePath: f.filePath,
+              content: f.content,
+            })),
+          }),
+        });
+
+        const payload = (await response.json()) as {
+          ok: boolean;
+          healed: boolean;
+          diagnosis?: string;
+          files?: { filePath: string; content: string }[];
+          error?: string;
+        };
+
+        if (!response.ok || !payload.ok || !payload.healed) {
+          throw new Error(payload.error ?? "Automated repair could not resolve this diagnostic.");
+        }
+
+        if (payload.files && Array.isArray(payload.files)) {
+          for (const f of payload.files) {
+            const healed = repairSourceCode(f.filePath, f.content);
+            writeFile(f.filePath, healed.content);
+          }
+        }
+
+        dispatch({ type: "clearDiagnostics" });
+        dispatch({ type: "setPreviewStatus", status: "ready" });
+
+        const newVersion = createCheckpoint("Self-heal checkpoint");
+        dispatch({
+          type: "addMessage",
+          message: {
+            id: shortId("msg"),
+            projectId,
+            role: "assistant",
+            content: `✨ Self-healing applied: ${payload.diagnosis ?? "Fixed runtime error"}`,
+            statusPills: ["Self-Healed"],
+            patchedFiles: (payload.files ?? []).map((f) => f.filePath),
+            versionId: newVersion.id,
+            createdAt: nowIso(),
+          },
+        });
+
+        return true;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        dispatch({
+          type: "setError",
+          error: `Self-healing failed: ${msg}. You can inspect or edit in the Code panel.`,
+        });
+        return false;
+      } finally {
+        dispatch({ type: "setBusy", busy: false });
+      }
+    },
+    [createCheckpoint, projectId, writeFile],
+  );
+
   const restoreVersion = React.useCallback(
     (versionId: string) => {
       const snapshot = snapshots.current.get(versionId);
@@ -923,6 +1027,7 @@ export function StudioProvider({
       runPendingTasks,
       createCheckpoint,
       restoreVersion,
+      triggerQaRepair,
       fileMap,
       latestVersionLabel: state.versions[0]?.label ?? "v1.0",
     }),
@@ -936,6 +1041,7 @@ export function StudioProvider({
       runPendingTasks,
       createCheckpoint,
       restoreVersion,
+      triggerQaRepair,
       fileMap,
     ],
   );
