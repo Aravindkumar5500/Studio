@@ -1,0 +1,714 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users/{uid}
+// Document ID: Firebase Auth UID
+// Fields:
+//   - uid: string (required, immutable) - User Auth UID
+//   - email: string (required) - User email address
+//   - displayName: string | null (optional) - User display name
+//   - photoURL: string | null (optional) - Avatar URL
+//   - plan: string (required, immutable on update) - 'free' | 'pro' | 'team'
+//   - createdAt: string (required, immutable) - ISO timestamp
+//   - updatedAt: string (required) - ISO timestamp
+//
+// Collection: projects/{projectId}
+// Document ID: Unique project ID string
+// Fields:
+//   - id: string (required, immutable) - Project ID matching document ID
+//   - ownerId: string (required, immutable) - UID of project owner
+//   - name: string (required) - Project name
+//   - slug: string (required) - URL slug
+//   - description: string (required) - Description of project
+//   - status: string (required) - 'draft' | 'planning' | 'generating' | 'ready' | 'error'
+//   - workflowMode: string (required) - 'guided' | 'autonomous'
+//   - currentVersionId: string | null (optional) - Active version ID
+//   - framework: string (required) - 'nextjs'
+//   - entryFilePath: string (required) - Entry file path
+//   - createdAt: string (required, immutable) - ISO timestamp
+//   - updatedAt: string (required) - ISO timestamp
+//
+// Collection: project_members/{memberId}
+// Document ID: `${projectId}_${uid}`
+// Fields:
+//   - id: string (required, immutable) - Document ID matching `${projectId}_${uid}`
+//   - projectId: string (required, immutable) - Scoped project ID
+//   - uid: string (required, immutable) - Member user ID
+//   - role: string (required) - 'owner' | 'editor' | 'viewer'
+//   - invitedBy: string (required) - UID of inviter
+//   - createdAt: string (required, immutable) - ISO timestamp
+//
+// Collection: source_files/{fileId}
+// Document ID: `${projectId}_${pathHash}`
+// Fields:
+//   - id: string (required, immutable) - Document ID
+//   - projectId: string (required, immutable) - Scoped project ID
+//   - filePath: string (required, immutable) - Normalized file path
+//   - language: string (required) - Source language
+//   - content: string (required, max 256 KB) - File text content
+//   - sha256: string (required) - SHA256 checksum
+//   - byteSize: int (required, <= 256 KB) - Byte size of content
+//   - exportSignatures: list of strings (required) - Exported symbols
+//   - imports: list of strings (required) - Import statements
+//   - lastModifiedBy: string (required) - UID of modifying user
+//   - createdAt: string (required, immutable) - ISO timestamp
+//   - updatedAt: string (required) - ISO timestamp
+//
+// Collection: project_versions/{versionId}
+// Document ID: Unique version ID string (immutable checkpoint)
+// Fields:
+//   - id: string (required, immutable) - Version ID
+//   - projectId: string (required, immutable) - Scoped project ID
+//   - label: string (required, immutable) - Version label
+//   - parentVersionId: string | null (optional, immutable) - Parent version ID
+//   - manifest: list of maps (required, immutable) - File manifest entries
+//   - createdBy: string (required, immutable) - UID of creator
+//   - createdAt: string (required, immutable) - ISO timestamp
+//
+// Collection: requirements/{projectId}
+// Document ID: Project ID string
+// Fields:
+//   - id: string (required, immutable) - Project ID
+//   - projectId: string (required, immutable) - Project ID
+//   - productName: string (required) - Product name
+//   - oneLiner: string (required) - Brief summary
+//   - targetUsers: list of strings (required) - Target user personas
+//   - problemStatement: string (required) - Problem definition
+//   - features: list of maps (required) - Feature breakdown
+//   - userStories: list of maps (required) - User stories
+//   - nonFunctional: list of strings (required) - NFRs
+//   - outOfScope: list of strings (required) - Out of scope items
+//   - approvedBy: string | null (optional) - Approver UID
+//   - approvedAt: string | null (optional) - Approval timestamp
+//   - createdAt: string (required, immutable) - ISO timestamp
+//   - updatedAt: string (required) - ISO timestamp
+//
+// Collection: design_systems/{projectId}
+// Document ID: Project ID string
+// Fields:
+//   - id: string (required, immutable) - Project ID
+//   - projectId: string (required, immutable) - Project ID
+//   - name: string (required) - Design system name
+//   - colors: map (required) - Color tokens
+//   - typography: map (required) - Typography tokens
+//   - spacing: map (required) - Spacing tokens
+//   - radius: map (required) - Corner radius tokens
+//   - shadows: map (required) - Box shadow tokens
+//   - componentConventions: list of strings (required) - UI conventions
+//   - createdAt: string (required, immutable) - ISO timestamp
+//   - updatedAt: string (required) - ISO timestamp
+//
+// Collection: generation_tasks/{taskId}
+// Document ID: Unique task ID string
+// Fields:
+//   - id: string (required, immutable) - Task ID
+//   - projectId: string (required, immutable) - Scoped project ID
+//   - title: string (required) - Task title
+//   - description: string (required) - Task description
+//   - agentRole: string (required) - 'product' | 'architect' | 'design' | 'frontend' | 'backend' | 'database' | 'integration' | 'security' | 'qa'
+//   - provider: string (required) - 'gemini' | 'groq'
+//   - targetFilePath: string (required) - Target file path
+//   - requiredContextFiles: list of strings (required) - Context file paths
+//   - dependsOn: list of strings (required) - Task dependency IDs
+//   - exportedSymbols: list of strings (required) - Exported symbols
+//   - order: int (required) - DAG topological order
+//   - status: string (required) - Task status
+//   - attempts: int (required) - Attempt counter
+//   - error: string | null (optional) - Error message if failed
+//   - tokensIn: int (required) - Input token count
+//   - tokensOut: int (required) - Output token count
+//   - startedAt: string | null (optional) - Start timestamp
+//   - finishedAt: string | null (optional) - Finish timestamp
+//   - createdAt: string (required, immutable) - ISO timestamp
+//   - updatedAt: string (required) - ISO timestamp
+//
+// Collection: conversations/{conversationId} (and /messages/{messageId})
+// Document ID: Conversation / Message ID
+// Fields:
+//   - id: string (required, immutable)
+//   - projectId: string (required, immutable)
+//   - role: string (required) - 'user' | 'assistant' | 'system'
+//   - content: string (required) - Message text
+//   - statusPills: list of strings (required)
+//   - patchedFiles: list of strings (required)
+//   - versionId: string | null (optional)
+//   - createdAt: string (required, immutable)
+//
+// Collection: approvals/{approvalId}
+// Document ID: Unique approval ID string
+// Fields:
+//   - id: string (required, immutable) - Approval ID
+//   - projectId: string (required, immutable) - Scoped project ID
+//   - stage: string (required) - 'prd' | 'architecture' | 'design_system' | 'task_batch'
+//   - payloadRef: string (required) - Payload reference identifier
+//   - summary: string (required) - Human-readable summary
+//   - status: string (required) - 'pending' | 'approved' | 'rejected'
+//   - decidedBy: string | null (optional) - Decider UID
+//   - decidedAt: string | null (optional) - Decision timestamp
+//   - createdAt: string (required, immutable) - ISO timestamp
+//
+// Collection: build_runs/{runId}
+// Document ID: Unique build run ID string
+// Fields:
+//   - id: string (required, immutable) - Run ID
+//   - projectId: string (required, immutable) - Scoped project ID
+//   - versionId: string (required) - Version ID built
+//   - status: string (required) - 'queued' | 'running' | 'passed' | 'failed'
+//   - logs: list of strings (required) - Execution log lines
+//   - startedAt: string (required, immutable) - Start timestamp
+//   - finishedAt: string | null (optional) - Finish timestamp
+//
+// Collection: test_runs/{runId}
+// Document ID: Unique test run ID string
+// Fields:
+//   - id: string (required, immutable) - Run ID
+//   - projectId: string (required, immutable) - Scoped project ID
+//   - versionId: string (required) - Version ID tested
+//   - status: string (required) - 'queued' | 'running' | 'passed' | 'failed'
+//   - passed: int (required) - Passed test count
+//   - failed: int (required) - Failed test count
+//   - report: string (required) - Test report text
+//   - startedAt: string (required, immutable) - Start timestamp
+//   - finishedAt: string | null (optional) - Finish timestamp
+//
+// Collection: deployments/{deploymentId}
+// Document ID: Unique deployment ID string
+// Fields:
+//   - id: string (required, immutable) - Deployment ID
+//   - projectId: string (required, immutable) - Scoped project ID
+//   - versionId: string (required) - Version ID deployed
+//   - target: string (required) - 'vercel' | 'github'
+//   - url: string | null (optional) - Deployment URL
+//   - repoFullName: string | null (optional) - GitHub repository name
+//   - status: string (required) - 'queued' | 'building' | 'ready' | 'error'
+//   - logs: list of strings (required) - Deployment logs
+//   - createdBy: string (required) - Deployer UID
+//   - createdAt: string (required, immutable) - ISO timestamp
+//   - updatedAt: string (required) - ISO timestamp
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Global Default Deny
+    // ===============================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ===============================================================
+    // Core Helper Functions
+    // ===============================================================
+
+    // Check if user is authenticated
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Check if authenticated user is the owner of the given project document
+    function isProjectOwner(projectId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/projects/$(projectId)) &&
+        get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid;
+    }
+
+    // Check if membership document exists in project_members
+    function isMemberDoc(projectId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/project_members/$(projectId + '_' + request.auth.uid));
+    }
+
+    // Check if user is either project owner or registered project member
+    function isProjectMember(projectId) {
+      return isSignedIn() && (
+        isProjectOwner(projectId) ||
+        isMemberDoc(projectId)
+      );
+    }
+
+    // Check if user has write privileges (owner or editor role)
+    function canWriteProject(projectId) {
+      return isSignedIn() && (
+        isProjectOwner(projectId) ||
+        (
+          isMemberDoc(projectId) &&
+          get(/databases/$(database)/documents/project_members/$(projectId + '_' + request.auth.uid)).data.role in ['owner', 'editor']
+        )
+      );
+    }
+
+    // Validate email format
+    function isValidEmail(email) {
+      return email is string &&
+        email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validator Functions
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'plan', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'plan', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128 &&
+        data.email is string && data.email.size() > 3 && data.email.size() <= 256 && isValidEmail(data.email) &&
+        (!('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() <= 100)) &&
+        (!('photoURL' in data) || data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 2048)) &&
+        data.plan in ['free', 'pro', 'team'] &&
+        data.createdAt is string && data.createdAt.size() <= 50 &&
+        data.updatedAt is string && data.updatedAt.size() <= 50;
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'name', 'slug', 'description', 'status', 'workflowMode', 'framework', 'entryFilePath', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'name', 'slug', 'description', 'status', 'workflowMode', 'currentVersionId', 'framework', 'entryFilePath', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+        data.ownerId is string && data.ownerId.size() > 0 && data.ownerId.size() <= 128 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+        data.slug is string && data.slug.size() > 0 && data.slug.size() <= 100 &&
+        data.description is string && data.description.size() <= 2000 &&
+        data.status in ['draft', 'planning', 'generating', 'ready', 'error'] &&
+        data.workflowMode in ['guided', 'autonomous'] &&
+        (!('currentVersionId' in data) || data.currentVersionId == null || (data.currentVersionId is string && data.currentVersionId.size() <= 100)) &&
+        data.framework == 'nextjs' &&
+        data.entryFilePath is string && data.entryFilePath.size() > 0 && data.entryFilePath.size() <= 300 &&
+        data.createdAt is string && data.createdAt.size() <= 50 &&
+        data.updatedAt is string && data.updatedAt.size() <= 50;
+    }
+
+    function isValidProjectMember(data) {
+      return data.keys().hasAll(['id', 'projectId', 'uid', 'role', 'invitedBy', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'projectId', 'uid', 'role', 'invitedBy', 'createdAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 200 &&
+        data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 100 &&
+        data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128 &&
+        data.role in ['owner', 'editor', 'viewer'] &&
+        data.invitedBy is string && data.invitedBy.size() <= 128 &&
+        data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    function isValidSourceFile(data) {
+      return data.keys().hasAll(['id', 'projectId', 'filePath', 'language', 'content', 'sha256', 'byteSize', 'exportSignatures', 'imports', 'lastModifiedBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'projectId', 'filePath', 'language', 'content', 'sha256', 'byteSize', 'exportSignatures', 'imports', 'lastModifiedBy', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 200 &&
+        data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 100 &&
+        data.filePath is string && data.filePath.size() > 0 && data.filePath.size() <= 500 &&
+        data.language in ['typescript', 'tsx', 'javascript', 'jsx', 'css', 'json', 'markdown', 'html', 'plaintext'] &&
+        data.content is string && data.content.size() <= 256 * 1024 &&
+        data.sha256 is string && data.sha256.size() <= 100 &&
+        data.byteSize is int && data.byteSize >= 0 && data.byteSize <= 256 * 1024 &&
+        data.exportSignatures is list && data.exportSignatures.size() <= 1000 &&
+        data.imports is list && data.imports.size() <= 1000 &&
+        data.lastModifiedBy is string && data.lastModifiedBy.size() <= 128 &&
+        data.createdAt is string && data.createdAt.size() <= 50 &&
+        data.updatedAt is string && data.updatedAt.size() <= 50;
+    }
+
+    function isValidProjectVersion(data) {
+      return data.keys().hasAll(['id', 'projectId', 'label', 'manifest', 'createdBy', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'projectId', 'label', 'parentVersionId', 'manifest', 'createdBy', 'createdAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+        data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 100 &&
+        data.label is string && data.label.size() > 0 && data.label.size() <= 100 &&
+        (!('parentVersionId' in data) || data.parentVersionId == null || (data.parentVersionId is string && data.parentVersionId.size() <= 100)) &&
+        data.manifest is list && data.manifest.size() <= 2000 &&
+        data.createdBy is string && data.createdBy.size() <= 128 &&
+        data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    function isValidRequirements(data) {
+      return data.keys().hasAll(['id', 'projectId', 'productName', 'oneLiner', 'targetUsers', 'problemStatement', 'features', 'userStories', 'nonFunctional', 'outOfScope', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'projectId', 'productName', 'oneLiner', 'targetUsers', 'problemStatement', 'features', 'userStories', 'nonFunctional', 'outOfScope', 'approvedBy', 'approvedAt', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+        data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 100 &&
+        data.productName is string && data.productName.size() <= 200 &&
+        data.oneLiner is string && data.oneLiner.size() <= 500 &&
+        data.targetUsers is list && data.targetUsers.size() <= 50 &&
+        data.problemStatement is string && data.problemStatement.size() <= 10000 &&
+        data.features is list && data.features.size() <= 200 &&
+        data.userStories is list && data.userStories.size() <= 200 &&
+        data.nonFunctional is list && data.nonFunctional.size() <= 100 &&
+        data.outOfScope is list && data.outOfScope.size() <= 100 &&
+        (!('approvedBy' in data) || data.approvedBy == null || (data.approvedBy is string && data.approvedBy.size() <= 128)) &&
+        (!('approvedAt' in data) || data.approvedAt == null || (data.approvedAt is string && data.approvedAt.size() <= 50)) &&
+        data.createdAt is string && data.createdAt.size() <= 50 &&
+        data.updatedAt is string && data.updatedAt.size() <= 50;
+    }
+
+    function isValidDesignSystem(data) {
+      return data.keys().hasAll(['id', 'projectId', 'name', 'colors', 'typography', 'spacing', 'radius', 'shadows', 'componentConventions', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'projectId', 'name', 'colors', 'typography', 'spacing', 'radius', 'shadows', 'componentConventions', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+        data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 100 &&
+        data.name is string && data.name.size() <= 100 &&
+        data.colors is map &&
+        data.typography is map &&
+        data.spacing is map &&
+        data.radius is map &&
+        data.shadows is map &&
+        data.componentConventions is list && data.componentConventions.size() <= 100 &&
+        data.createdAt is string && data.createdAt.size() <= 50 &&
+        data.updatedAt is string && data.updatedAt.size() <= 50;
+    }
+
+    function isValidGenerationTask(data) {
+      return data.keys().hasAll(['id', 'projectId', 'title', 'description', 'agentRole', 'provider', 'targetFilePath', 'requiredContextFiles', 'dependsOn', 'exportedSymbols', 'order', 'status', 'attempts', 'tokensIn', 'tokensOut', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'projectId', 'title', 'description', 'agentRole', 'provider', 'targetFilePath', 'requiredContextFiles', 'dependsOn', 'exportedSymbols', 'order', 'status', 'attempts', 'error', 'tokensIn', 'tokensOut', 'startedAt', 'finishedAt', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+        data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 100 &&
+        data.title is string && data.title.size() <= 200 &&
+        data.description is string && data.description.size() <= 5000 &&
+        data.agentRole in ['product', 'architect', 'design', 'frontend', 'backend', 'database', 'integration', 'security', 'qa'] &&
+        data.provider in ['gemini', 'groq'] &&
+        data.targetFilePath is string && data.targetFilePath.size() <= 500 &&
+        data.requiredContextFiles is list && data.requiredContextFiles.size() <= 100 &&
+        data.dependsOn is list && data.dependsOn.size() <= 100 &&
+        data.exportedSymbols is list && data.exportedSymbols.size() <= 200 &&
+        data.order is int && data.order >= 0 &&
+        data.status in ['pending', 'awaiting_approval', 'running', 'succeeded', 'failed', 'skipped'] &&
+        data.attempts is int && data.attempts >= 0 &&
+        (!('error' in data) || data.error == null || (data.error is string && data.error.size() <= 10000)) &&
+        data.tokensIn is int && data.tokensIn >= 0 &&
+        data.tokensOut is int && data.tokensOut >= 0 &&
+        (!('startedAt' in data) || data.startedAt == null || (data.startedAt is string && data.startedAt.size() <= 50)) &&
+        (!('finishedAt' in data) || data.finishedAt == null || (data.finishedAt is string && data.finishedAt.size() <= 50)) &&
+        data.createdAt is string && data.createdAt.size() <= 50 &&
+        data.updatedAt is string && data.updatedAt.size() <= 50;
+    }
+
+    function isValidConversation(data) {
+      return data.keys().hasOnly(['id', 'projectId', 'title', 'createdAt', 'updatedAt']) &&
+        (!('id' in data) || (data.id is string && data.id.size() <= 100)) &&
+        (!('projectId' in data) || (data.projectId is string && data.projectId.size() <= 100)) &&
+        (!('title' in data) || (data.title is string && data.title.size() <= 200)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 50)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 50));
+    }
+
+    function isValidConversationMessage(data) {
+      return data.keys().hasAll(['id', 'projectId', 'role', 'content', 'statusPills', 'patchedFiles', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'projectId', 'role', 'content', 'statusPills', 'patchedFiles', 'versionId', 'createdAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+        data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 100 &&
+        data.role in ['user', 'assistant', 'system'] &&
+        data.content is string && data.content.size() <= 100000 &&
+        data.statusPills is list && data.statusPills.size() <= 100 &&
+        data.patchedFiles is list && data.patchedFiles.size() <= 500 &&
+        (!('versionId' in data) || data.versionId == null || (data.versionId is string && data.versionId.size() <= 100)) &&
+        data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    function isValidApproval(data) {
+      return data.keys().hasAll(['id', 'projectId', 'stage', 'payloadRef', 'summary', 'status', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'projectId', 'stage', 'payloadRef', 'summary', 'status', 'decidedBy', 'decidedAt', 'createdAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+        data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 100 &&
+        data.stage in ['prd', 'architecture', 'design_system', 'task_batch'] &&
+        data.payloadRef is string && data.payloadRef.size() <= 300 &&
+        data.summary is string && data.summary.size() <= 2000 &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        (!('decidedBy' in data) || data.decidedBy == null || (data.decidedBy is string && data.decidedBy.size() <= 128)) &&
+        (!('decidedAt' in data) || data.decidedAt == null || (data.decidedAt is string && data.decidedAt.size() <= 50)) &&
+        data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    function isValidBuildRun(data) {
+      return data.keys().hasAll(['id', 'projectId', 'versionId', 'status', 'logs', 'startedAt']) &&
+        data.keys().hasOnly(['id', 'projectId', 'versionId', 'status', 'logs', 'startedAt', 'finishedAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+        data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 100 &&
+        data.versionId is string && data.versionId.size() <= 100 &&
+        data.status in ['queued', 'running', 'passed', 'failed'] &&
+        data.logs is list && data.logs.size() <= 5000 &&
+        data.startedAt is string && data.startedAt.size() <= 50 &&
+        (!('finishedAt' in data) || data.finishedAt == null || (data.finishedAt is string && data.finishedAt.size() <= 50));
+    }
+
+    function isValidTestRun(data) {
+      return data.keys().hasAll(['id', 'projectId', 'versionId', 'status', 'passed', 'failed', 'report', 'startedAt']) &&
+        data.keys().hasOnly(['id', 'projectId', 'versionId', 'status', 'passed', 'failed', 'report', 'startedAt', 'finishedAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+        data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 100 &&
+        data.versionId is string && data.versionId.size() <= 100 &&
+        data.status in ['queued', 'running', 'passed', 'failed'] &&
+        data.passed is int && data.passed >= 0 &&
+        data.failed is int && data.failed >= 0 &&
+        data.report is string && data.report.size() <= 50000 &&
+        data.startedAt is string && data.startedAt.size() <= 50 &&
+        (!('finishedAt' in data) || data.finishedAt == null || (data.finishedAt is string && data.finishedAt.size() <= 50));
+    }
+
+    function isValidDeployment(data) {
+      return data.keys().hasAll(['id', 'projectId', 'versionId', 'target', 'status', 'logs', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'projectId', 'versionId', 'target', 'url', 'repoFullName', 'status', 'logs', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+        data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 100 &&
+        data.versionId is string && data.versionId.size() <= 100 &&
+        data.target in ['vercel', 'github'] &&
+        (!('url' in data) || data.url == null || (data.url is string && data.url.size() <= 2048)) &&
+        (!('repoFullName' in data) || data.repoFullName == null || (data.repoFullName is string && data.repoFullName.size() <= 200)) &&
+        data.status in ['queued', 'building', 'ready', 'error'] &&
+        data.logs is list && data.logs.size() <= 5000 &&
+        data.createdBy is string && data.createdBy.size() <= 128 &&
+        data.createdAt is string && data.createdAt.size() <= 50 &&
+        data.updatedAt is string && data.updatedAt.size() <= 50;
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // 1. Users Collection (Read/Write strictly restricted to owner user)
+    match /users/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow create: if isSignedIn() &&
+        request.auth.uid == uid &&
+        isValidUser(request.resource.data) &&
+        request.resource.data.uid == uid;
+      allow update: if isSignedIn() &&
+        request.auth.uid == uid &&
+        isValidUser(request.resource.data) &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.plan == resource.data.plan;
+      allow delete: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    // 2. Projects Collection
+    match /projects/{projectId} {
+      allow read: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid ||
+        isMemberDoc(projectId)
+      );
+      allow create: if isSignedIn() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        isValidProject(request.resource.data) &&
+        request.resource.data.id == projectId;
+      allow update: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid ||
+        (
+          isMemberDoc(projectId) &&
+          get(/databases/$(database)/documents/project_members/$(projectId + '_' + request.auth.uid)).data.role in ['owner', 'editor']
+        )
+      ) &&
+        isValidProject(request.resource.data) &&
+        request.resource.data.ownerId == resource.data.ownerId &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.id == resource.data.id;
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    // 3. Project Members Collection
+    match /project_members/{memberId} {
+      allow read: if isSignedIn() && (
+        resource.data.uid == request.auth.uid ||
+        isProjectOwner(resource.data.projectId)
+      );
+      allow create: if isSignedIn() &&
+        isProjectOwner(request.resource.data.projectId) &&
+        isValidProjectMember(request.resource.data) &&
+        memberId == request.resource.data.projectId + '_' + request.resource.data.uid &&
+        request.resource.data.id == memberId;
+      allow update: if isSignedIn() &&
+        isProjectOwner(resource.data.projectId) &&
+        isValidProjectMember(request.resource.data) &&
+        request.resource.data.projectId == resource.data.projectId &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.id == resource.data.id;
+      allow delete: if isSignedIn() && isProjectOwner(resource.data.projectId);
+    }
+
+    // 4. Source Files Collection
+    match /source_files/{fileId} {
+      allow read: if isSignedIn() && isProjectMember(resource.data.projectId);
+      allow create: if isSignedIn() &&
+        canWriteProject(request.resource.data.projectId) &&
+        isValidSourceFile(request.resource.data) &&
+        request.resource.data.id == fileId;
+      allow update: if isSignedIn() &&
+        canWriteProject(resource.data.projectId) &&
+        isValidSourceFile(request.resource.data) &&
+        request.resource.data.projectId == resource.data.projectId &&
+        request.resource.data.filePath == resource.data.filePath &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.id == resource.data.id;
+      allow delete: if isSignedIn() && canWriteProject(resource.data.projectId);
+    }
+
+    // 5. Project Versions Collection (Immutable Checkpoint)
+    match /project_versions/{versionId} {
+      allow read: if isSignedIn() && isProjectMember(resource.data.projectId);
+      allow create: if isSignedIn() &&
+        canWriteProject(request.resource.data.projectId) &&
+        isValidProjectVersion(request.resource.data) &&
+        request.resource.data.id == versionId;
+      allow update, delete: if false;
+    }
+
+    // 6. Requirements Collection (PRD)
+    match /requirements/{projectId} {
+      allow read: if isSignedIn() && isProjectMember(projectId);
+      allow create: if isSignedIn() &&
+        canWriteProject(projectId) &&
+        isValidRequirements(request.resource.data) &&
+        request.resource.data.projectId == projectId &&
+        request.resource.data.id == projectId;
+      allow update: if isSignedIn() &&
+        canWriteProject(projectId) &&
+        isValidRequirements(request.resource.data) &&
+        request.resource.data.projectId == projectId &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.id == resource.data.id;
+      allow delete: if isSignedIn() && canWriteProject(projectId);
+    }
+
+    // 7. Design Systems Collection
+    match /design_systems/{projectId} {
+      allow read: if isSignedIn() && isProjectMember(projectId);
+      allow create: if isSignedIn() &&
+        canWriteProject(projectId) &&
+        isValidDesignSystem(request.resource.data) &&
+        request.resource.data.projectId == projectId &&
+        request.resource.data.id == projectId;
+      allow update: if isSignedIn() &&
+        canWriteProject(projectId) &&
+        isValidDesignSystem(request.resource.data) &&
+        request.resource.data.projectId == projectId &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.id == resource.data.id;
+      allow delete: if isSignedIn() && canWriteProject(projectId);
+    }
+
+    // 8. Generation Tasks Collection (DAG nodes)
+    match /generation_tasks/{taskId} {
+      allow read: if isSignedIn() && isProjectMember(resource.data.projectId);
+      allow create: if isSignedIn() &&
+        canWriteProject(request.resource.data.projectId) &&
+        isValidGenerationTask(request.resource.data) &&
+        request.resource.data.id == taskId;
+      allow update: if isSignedIn() &&
+        canWriteProject(resource.data.projectId) &&
+        isValidGenerationTask(request.resource.data) &&
+        request.resource.data.projectId == resource.data.projectId &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.id == resource.data.id;
+      allow delete: if isSignedIn() && canWriteProject(resource.data.projectId);
+    }
+
+    // 9. Conversations Collection (and nested messages)
+    match /conversations/{conversationId} {
+      allow read: if isSignedIn() && (
+        isProjectMember(conversationId) ||
+        ('projectId' in resource.data && isProjectMember(resource.data.projectId))
+      );
+      allow create: if isSignedIn() && (
+        canWriteProject(conversationId) ||
+        ('projectId' in request.resource.data && canWriteProject(request.resource.data.projectId))
+      ) && isValidConversation(request.resource.data);
+      allow update: if isSignedIn() && (
+        canWriteProject(conversationId) ||
+        ('projectId' in resource.data && canWriteProject(resource.data.projectId))
+      ) && isValidConversation(request.resource.data);
+      allow delete: if isSignedIn() && (
+        canWriteProject(conversationId) ||
+        ('projectId' in resource.data && canWriteProject(resource.data.projectId))
+      );
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && (
+          isProjectMember(conversationId) ||
+          ('projectId' in resource.data && isProjectMember(resource.data.projectId))
+        );
+        allow create: if isSignedIn() && (
+          canWriteProject(conversationId) ||
+          ('projectId' in request.resource.data && canWriteProject(request.resource.data.projectId))
+        ) &&
+          isValidConversationMessage(request.resource.data) &&
+          request.resource.data.id == messageId;
+        allow update: if isSignedIn() && (
+          canWriteProject(conversationId) ||
+          ('projectId' in resource.data && canWriteProject(resource.data.projectId))
+        ) &&
+          isValidConversationMessage(request.resource.data) &&
+          request.resource.data.projectId == resource.data.projectId &&
+          request.resource.data.createdAt == resource.data.createdAt &&
+          request.resource.data.id == resource.data.id;
+        allow delete: if isSignedIn() && (
+          canWriteProject(conversationId) ||
+          ('projectId' in resource.data && canWriteProject(resource.data.projectId))
+        );
+      }
+    }
+
+    // 10. Approvals Collection (Guided Mode gates)
+    match /approvals/{approvalId} {
+      allow read: if isSignedIn() && isProjectMember(resource.data.projectId);
+      allow create: if isSignedIn() &&
+        canWriteProject(request.resource.data.projectId) &&
+        isValidApproval(request.resource.data) &&
+        request.resource.data.id == approvalId;
+      allow update: if isSignedIn() &&
+        canWriteProject(resource.data.projectId) &&
+        isValidApproval(request.resource.data) &&
+        request.resource.data.projectId == resource.data.projectId &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.id == resource.data.id;
+      allow delete: if isSignedIn() && canWriteProject(resource.data.projectId);
+    }
+
+    // 11. Build Runs Collection
+    match /build_runs/{runId} {
+      allow read: if isSignedIn() && isProjectMember(resource.data.projectId);
+      allow create: if isSignedIn() &&
+        canWriteProject(request.resource.data.projectId) &&
+        isValidBuildRun(request.resource.data) &&
+        request.resource.data.id == runId;
+      allow update: if isSignedIn() &&
+        canWriteProject(resource.data.projectId) &&
+        isValidBuildRun(request.resource.data) &&
+        request.resource.data.projectId == resource.data.projectId &&
+        request.resource.data.startedAt == resource.data.startedAt &&
+        request.resource.data.id == resource.data.id;
+      allow delete: if isSignedIn() && canWriteProject(resource.data.projectId);
+    }
+
+    // 12. Test Runs Collection
+    match /test_runs/{runId} {
+      allow read: if isSignedIn() && isProjectMember(resource.data.projectId);
+      allow create: if isSignedIn() &&
+        canWriteProject(request.resource.data.projectId) &&
+        isValidTestRun(request.resource.data) &&
+        request.resource.data.id == runId;
+      allow update: if isSignedIn() &&
+        canWriteProject(resource.data.projectId) &&
+        isValidTestRun(request.resource.data) &&
+        request.resource.data.projectId == resource.data.projectId &&
+        request.resource.data.startedAt == resource.data.startedAt &&
+        request.resource.data.id == resource.data.id;
+      allow delete: if isSignedIn() && canWriteProject(resource.data.projectId);
+    }
+
+    // 13. Deployments Collection
+    match /deployments/{deploymentId} {
+      allow read: if isSignedIn() && isProjectMember(resource.data.projectId);
+      allow create: if isSignedIn() &&
+        canWriteProject(request.resource.data.projectId) &&
+        isValidDeployment(request.resource.data) &&
+        request.resource.data.id == deploymentId;
+      allow update: if isSignedIn() &&
+        canWriteProject(resource.data.projectId) &&
+        isValidDeployment(request.resource.data) &&
+        request.resource.data.projectId == resource.data.projectId &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.id == resource.data.id;
+      allow delete: if isSignedIn() && canWriteProject(resource.data.projectId);
+    }
+  }
+}
+
