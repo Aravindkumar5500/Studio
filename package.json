@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:integrity": "npx --yes tsx src/modules/code-integrity/__tests__/code-integrity.test.ts",
+    "test:runtime": "npx --yes tsx src/modules/code-integrity/__tests__/runtime-e2e-verification.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",
