@@ -162,7 +162,7 @@ function runLocalChecks() {
       fontMono: "JetBrains Mono, monospace",
       radius: { md: "10px" },
     };
-    const bundle = buildSandpackFiles(SEED_FILES, theme);
+    const bundle = buildSandpackFiles(buildSeedProject(), theme);
     const html = bundle["/public/index.html"]?.code || "";
     const themeModule = bundle["/studio-theme.ts"]?.code || "";
     const valid =
