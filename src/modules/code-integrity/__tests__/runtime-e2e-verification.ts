@@ -3,7 +3,7 @@ import { validateDag, type DagTaskNode } from "@/lib/ai/schemas";
 import { buildSandpackFiles } from "@/lib/sandpack/build-files";
 import { stampStudioIds, scanJsxElements } from "@/lib/patch/studio-id";
 import { setGroupToken } from "@/lib/patch/class-groups";
-import { SEED_FILES, SEED_DESIGN_SYSTEM } from "@/lib/vfs/seed";
+import { buildSeedProject, SEED_DESIGN_SYSTEM } from "@/lib/vfs/seed";
 import {
   repairSourceCode,
   validateSourceCode,
@@ -58,8 +58,9 @@ function runLocalChecks() {
 
   // 1. Seed VFS and Sandpack entry files.
   try {
-    const keys = Object.keys(SEED_FILES);
-    const bundle = buildSandpackFiles(SEED_FILES, {
+    const seedFiles = buildSeedProject();
+    const keys = Object.keys(seedFiles);
+    const bundle = buildSandpackFiles(seedFiles, {
       colors: SEED_DESIGN_SYSTEM.colors,
       radius: SEED_DESIGN_SYSTEM.radius,
       fontSans: SEED_DESIGN_SYSTEM.typography.fontSans,
@@ -221,7 +222,7 @@ function runLocalChecks() {
 
   // Validate the project-wide VFS API directly with the seed files.
   try {
-    const result = validateProjectVfs(SEED_FILES);
+    const result = validateProjectVfs(buildSeedProject());
     pass(
       "12. Seed project-wide integrity validation",
       result.valid,
