@@ -1,671 +1,393 @@
-import { validateSourceCode, repairSourceCode, validateProjectVfs } from "../application/code-integrity-service";
+import { VIEWPORTS } from "@/components/studio/TopNavBar";
+import { validateDag, type DagTaskNode } from "@/lib/ai/schemas";
 import { buildSandpackFiles } from "@/lib/sandpack/build-files";
 import { stampStudioIds, scanJsxElements } from "@/lib/patch/studio-id";
 import { setGroupToken } from "@/lib/patch/class-groups";
-import { SEED_FILES, SEED_DESIGN_SYSTEM } from "@/lib/vfs/seed";
-import type { CodeDiagnostic, RuntimeDiagnostic } from "../domain/types";
+import { buildSeedProject, SEED_DESIGN_SYSTEM } from "@/lib/vfs/seed";
+import {
+  repairSourceCode,
+  validateSourceCode,
+  validateProjectVfs,
+} from "../application/code-integrity-service";
 
+type Status = "PASS" | "FAIL" | "BLOCKED";
 interface TestReport {
   name: string;
-  category: string;
-  steps: string[];
+  status: Status;
   expected: string;
   actual: string;
-  status: "PASS" | "FAIL" | "BLOCKED";
-  details?: unknown;
 }
 
 const reports: TestReport[] = [];
+const baseUrl = (process.env.STUDIO_E2E_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
+const authToken = process.env.STUDIO_E2E_AUTH_TOKEN;
 
-function recordTest(report: TestReport) {
-  reports.push(report);
-  const icon = report.status === "PASS" ? "✅" : report.status === "FAIL" ? "❌" : "⚠️";
-  console.log(`${icon} [${report.status}] ${report.name}`);
-  if (report.status !== "PASS") {
-    console.log(`   Expected: ${report.expected}`);
-    console.log(`   Actual:   ${report.actual}`);
-  }
+function record(name: string, status: Status, expected: string, actual: string) {
+  reports.push({ name, status, expected, actual });
+  const icon = status === "PASS" ? "PASS" : status === "FAIL" ? "FAIL" : "BLOCKED";
+  console.log("[" + icon + "] " + name + " — " + actual);
 }
 
-async function runEndToEndVerification() {
-  console.log("==================================================================");
-  console.log("   STUDIO AI BUILDER — COMPLETE END-TO-END RUNTIME VERIFICATION   ");
-  console.log("==================================================================\n");
+function pass(name: string, condition: boolean, expected: string, actual: string) {
+  record(name, condition ? "PASS" : "FAIL", expected, actual);
+}
 
-  const baseUrl = "http://localhost:3000";
+function blocked(name: string, reason: string) {
+  record(name, "BLOCKED", "Explicit live E2E configuration required", reason);
+}
 
-  // -------------------------------------------------------------------------
-  // TEST 1: Studio Demo Workspace Integrity
-  // -------------------------------------------------------------------------
+function authHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    ...(authToken ? { Authorization: "Bearer " + authToken } : {}),
+  };
+}
+
+async function postJson(path: string, body: unknown) {
+  const response = await fetch(baseUrl + path, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  const json = (await response.json()) as Record<string, any>;
+  return { response, json };
+}
+
+function runLocalChecks() {
+  console.log("\n=== Studio local verification ===\n");
+
+  // 1. Seed VFS and Sandpack entry files.
   try {
-    const seedKeys = Object.keys(SEED_FILES);
-    const hasRootPage = seedKeys.includes("src/app/page.tsx");
-    const hasComponents = seedKeys.some((k) => k.startsWith("src/components/"));
-    const sandpackFiles = buildSandpackFiles(SEED_FILES, {
+    const seedFiles = buildSeedProject();
+    const keys = Object.keys(seedFiles);
+    const bundle = buildSandpackFiles(seedFiles, {
       colors: SEED_DESIGN_SYSTEM.colors,
       radius: SEED_DESIGN_SYSTEM.radius,
       fontSans: SEED_DESIGN_SYSTEM.typography.fontSans,
       fontMono: SEED_DESIGN_SYSTEM.typography.fontMono,
     });
-    const hasAppTsx = Boolean(sandpackFiles["/App.tsx"]);
-    const hasIndexTsx = Boolean(sandpackFiles["/index.tsx"]);
-    const hasTheme = Boolean(sandpackFiles["/studio-theme.ts"]);
-    const hasInspector = Boolean(sandpackFiles["/studio-inspector.ts"]);
-
-    const pass = hasRootPage && hasComponents && hasAppTsx && hasIndexTsx && hasTheme && hasInspector;
-    recordTest({
-      name: "1. Demo Workspace VFS & Sandpack Bundle Preparation",
-      category: "Workspace",
-      steps: [
-        "Load SEED_FILES from seed.ts",
-        "Verify root page (src/app/page.tsx) and component files exist",
-        "Transform files using buildSandpackFiles()",
-        "Verify Sandpack root bundle files (/App.tsx, /index.tsx, /studio-theme.ts, /studio-inspector.ts)",
-      ],
-      expected: "All seed files exist and buildSandpackFiles emits complete runnable bundle",
-      actual: `Found ${seedKeys.length} files. App.tsx: ${hasAppTsx}, index.tsx: ${hasIndexTsx}, theme: ${hasTheme}`,
-      status: pass ? "PASS" : "FAIL",
-    });
-  } catch (err) {
-    recordTest({
-      name: "1. Demo Workspace VFS & Sandpack Bundle Preparation",
-      category: "Workspace",
-      steps: ["Load SEED_FILES"],
-      expected: "Pass",
-      actual: String(err),
-      status: "FAIL",
-    });
+    const required = ["/App.tsx", "/index.tsx", "/studio-theme.ts", "/studio-inspector.ts"];
+    const missing = required.filter((key) => !bundle[key]?.code);
+    pass(
+      "1. Seed VFS and Sandpack bundle",
+      keys.includes("src/app/page.tsx") &&
+        keys.some((key) => key.startsWith("src/components/")) &&
+        missing.length === 0,
+      "Seed page/components and all generated Sandpack entry files exist",
+      keys.length + " source files; missing bundle files: " + (missing.join(", ") || "none"),
+    );
+  } catch (error) {
+    record("1. Seed VFS and Sandpack bundle", "FAIL", "Bundle generation succeeds", String(error));
   }
 
-  // -------------------------------------------------------------------------
-  // TEST 2: AI Planning API with Real Prompt
-  // -------------------------------------------------------------------------
-  let plannedTasks: { id: string; title: string; targetFilePath: string; dependsOn: string[] }[] = [];
+  // 2, 3, 8 and 9 require a running local server and are handled below.
+  // 4. Alias rewriting and Next.js shims.
   try {
-    const res = await fetch(`${baseUrl}/api/orchestrator/plan`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        projectId: "test_proj_salon",
-        projectName: "Glow & Co. Salon SaaS",
-        prompt: "Build a modern salon appointment booking system with service catalog and staff selection",
-        category: "Booking System",
-        workflowMode: "autonomous",
-      }),
-    });
-
-    const json = (await res.json()) as {
-      ok: boolean;
-      prd?: { overview?: { problem?: string } };
-      architecture?: { files?: unknown[] };
-      tasks?: { id: string; title: string; targetFilePath: string; dependsOn: string[] }[];
-      error?: string;
+    const sourceFiles: Record<string, string> = {
+      "src/app/page.tsx":
+        'import { Hero } from "@/components/Hero";\n' +
+        'import Link from "next/link";\n' +
+        "export default function Page() { return <main><Hero /><Link href=\"/book\">Book</Link></main>; }\n",
+      "src/components/Hero.tsx": "export function Hero() { return <h1>Hero</h1>; }\n",
     };
-
-    if (json.ok && Array.isArray(json.tasks) && json.tasks.length > 0) {
-      plannedTasks = json.tasks;
-      recordTest({
-        name: "2. AI Planning Pipeline (PRD, Architecture, and DAG Tasks)",
-        category: "Planning",
-        steps: [
-          "Send POST request to /api/orchestrator/plan with real prompt",
-          "Assert 200 OK and json.ok === true",
-          "Verify PRD generation and DAG task creation with valid dependencies",
-        ],
-        expected: "Plan generates PRD, Architecture, and at least 3 coarse DAG tasks",
-        actual: `Generated ${json.tasks.length} tasks: ${json.tasks.map((t) => t.title).join(", ")}`,
-        status: "PASS",
-        details: { taskCount: json.tasks.length },
-      });
-    } else {
-      recordTest({
-        name: "2. AI Planning Pipeline (PRD, Architecture, and DAG Tasks)",
-        category: "Planning",
-        steps: ["POST /api/orchestrator/plan"],
-        expected: "200 OK with valid tasks",
-        actual: `Status: ${res.status}, error: ${json.error || "No tasks returned"}`,
-        status: "FAIL",
-      });
-    }
-  } catch (err) {
-    recordTest({
-      name: "2. AI Planning Pipeline (PRD, Architecture, and DAG Tasks)",
-      category: "Planning",
-      steps: ["POST /api/orchestrator/plan"],
-      expected: "Pass",
-      actual: String(err),
-      status: "FAIL",
-    });
+    const bundle = buildSandpackFiles(sourceFiles, { colors: { primary: "#123456" } });
+    const page = bundle["/src/app/page.tsx"]?.code || "";
+    const passAliases =
+      page.includes('from "/src/components/Hero"') &&
+      page.includes('from "/src/__studio/next-link"') &&
+      !/from\s+["']@\/|from\s+["']src\//.test(page) &&
+      Boolean(bundle["/App.tsx"]?.code);
+    pass(
+      "4. Sandpack alias rewriting and Next.js shims",
+      passAliases,
+      "Aliases resolve and Next.js Link maps to the local shim",
+      "Hero alias, Link shim and App entry: " + String(passAliases),
+    );
+  } catch (error) {
+    record("4. Sandpack alias rewriting and Next.js shims", "FAIL", "Bundle alias checks pass", String(error));
   }
 
-  // -------------------------------------------------------------------------
-  // TEST 3: Deterministic Task Execution & Code Integrity Auto-Healing
-  // -------------------------------------------------------------------------
-  try {
-    const sampleTask = plannedTasks[0] || {
-      id: "task_mock_data",
-      title: "Define mock data",
-      targetFilePath: "src/data/mockData.ts",
-      dependsOn: [],
-    };
-
-    const res = await fetch(`${baseUrl}/api/orchestrator/execute-task`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        projectId: "test_proj_salon",
-        taskId: sampleTask.id,
-        task: sampleTask,
-        prd: { overview: { name: "Glow & Co.", problem: "Salon scheduling" } },
-        architecture: { files: [{ path: sampleTask.targetFilePath, purpose: sampleTask.title }] },
-        designSystem: SEED_DESIGN_SYSTEM,
-        existingFiles: [],
-      }),
-    });
-
-    const json = (await res.json()) as {
-      ok: boolean;
-      file?: { filePath: string; content: string };
-      validation?: { valid: boolean; errors: number };
-      error?: string;
-    };
-
-    if (json.ok && json.file?.content) {
-      // Validate with Code Integrity Engine
-      const integrity = validateSourceCode(json.file.filePath, json.file.content);
-      recordTest({
-        name: "3. Task Execution & Automated Code Integrity Validation",
-        category: "Execution",
-        steps: [
-          `Execute task '${sampleTask.title}' via /api/orchestrator/execute-task`,
-          "Verify file content generated",
-          "Run Code Integrity Engine validation on output",
-        ],
-        expected: "Task produces valid file passing Code Integrity Engine check",
-        actual: `Generated ${json.file.filePath} (${json.file.content.length} bytes). Code Integrity valid: ${integrity.valid}, errors: ${integrity.errors}`,
-        status: integrity.valid ? "PASS" : "FAIL",
-      });
-    } else {
-      recordTest({
-        name: "3. Task Execution & Automated Code Integrity Validation",
-        category: "Execution",
-        steps: ["POST /api/orchestrator/execute-task"],
-        expected: "200 OK with generated file",
-        actual: `Status: ${res.status}, error: ${json.error || "No file returned"}`,
-        status: "FAIL",
-      });
-    }
-  } catch (err) {
-    recordTest({
-      name: "3. Task Execution & Automated Code Integrity Validation",
-      category: "Execution",
-      steps: ["POST /api/orchestrator/execute-task"],
-      expected: "Pass",
-      actual: String(err),
-      status: "FAIL",
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // TEST 4: Sandpack Bundle Verification with Shims & Alias Resolution
-  // -------------------------------------------------------------------------
-  try {
-    const rawFiles: Record<string, string> = {
-      "src/app/page.tsx": `import React from "react";
-import { Hero } from "src/components/Hero.tsx";
-import { Features } from "components/Features";
-import Link from "next/link";
-export default function Page() {
-  return (
-    <main className="p-8">
-      <Hero />
-      <Features />
-      <Link href="/book">Book Now</Link>
-    </main>
+  // 5. Assert the actual viewport presets consumed by the UI.
+  pass(
+    "5. Actual responsive viewport presets",
+    VIEWPORTS.desktop.width === null &&
+      VIEWPORTS.tablet.width === 768 &&
+      VIEWPORTS.mobile.width === 375,
+    "Desktop is fluid; tablet is 768px; mobile is 375px",
+    "desktop=" + VIEWPORTS.desktop.width +
+      ", tablet=" + VIEWPORTS.tablet.width +
+      ", mobile=" + VIEWPORTS.mobile.width,
   );
-}`,
-      "src/components/Hero.tsx": `import React from "react";
-export function Hero() { return <h1>Hero</h1>; }`,
-      "src/components/Features.tsx": `import React from "react";
-export function Features() { return <section>Features</section>; }`,
-    };
 
-    const bundled = buildSandpackFiles(rawFiles, {
-      colors: { primary: "#10b981", accent: "#06b6d4" },
-    });
-
-    const pageCode = bundled["/src/app/page.tsx"]?.code ?? "";
-    const hasUnprefixedSrc = /import .* from ["']src\//.test(pageCode);
-    const hasNextLinkShim = pageCode.includes("/src/__studio/next-link");
-    const hasApp = Boolean(bundled["/App.tsx"]);
-
-    const pass = !hasUnprefixedSrc && hasNextLinkShim && hasApp;
-    recordTest({
-      name: "4. Sandpack Module Alias Rewriting & Next.js Shimming",
-      category: "Sandpack",
-      steps: [
-        "Feed raw component files with bare 'src/...' and 'next/link' imports",
-        "Process through buildSandpackFiles()",
-        "Verify bare 'src/...' imports are remapped to '/src/...'",
-        "Verify 'next/link' is remapped to Sandpack shim '/src/__studio/next-link'",
-      ],
-      expected: "All module paths cleanly remapped, zero unhandled bare 'src/' imports",
-      actual: `Unprefixed src present: ${hasUnprefixedSrc}, NextLink shimmed: ${hasNextLinkShim}, /App.tsx present: ${hasApp}`,
-      status: pass ? "PASS" : "FAIL",
-    });
-  } catch (err) {
-    recordTest({
-      name: "4. Sandpack Module Alias Rewriting & Next.js Shimming",
-      category: "Sandpack",
-      steps: ["buildSandpackFiles()"],
-      expected: "Pass",
-      actual: String(err),
-      status: "FAIL",
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // TEST 5: Responsive Preview Viewports
-  // -------------------------------------------------------------------------
+  // 6. AST stamping and class-token mutation.
   try {
-    const viewports = {
-      desktop: { width: undefined, label: "100%" },
-      tablet: { width: 768, label: "768px" },
-      mobile: { width: 375, label: "375px" },
-    };
-
-    const pass =
-      viewports.desktop.width === undefined &&
-      viewports.tablet.width === 768 &&
-      viewports.mobile.width === 375;
-
-    recordTest({
-      name: "5. Responsive Preview Viewport Presets",
-      category: "UI",
-      steps: [
-        "Inspect VIEWPORTS definition in TopNavBar / SandpackCanvas",
-        "Assert desktop === 100%, tablet === 768px, mobile === 375px",
-      ],
-      expected: "Standard viewport widths configured without layout breakage",
-      actual: `Desktop: ${viewports.desktop.label}, Tablet: ${viewports.tablet.label}, Mobile: ${viewports.mobile.label}`,
-      status: pass ? "PASS" : "FAIL",
-    });
-  } catch (err) {
-    recordTest({
-      name: "5. Responsive Preview Viewport Presets",
-      category: "UI",
-      steps: ["Inspect VIEWPORTS"],
-      expected: "Pass",
-      actual: String(err),
-      status: "FAIL",
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // TEST 6: Visual Inspector AST Stamping & Patching
-  // -------------------------------------------------------------------------
-  try {
-    const sourceWithGenerics = `import React, { useMemo } from "react";
-export function ScheduleList() {
-  const staff = new Set<string>();
-  staff.add("Elena");
-  return (
-    <div className="flex flex-col gap-2 p-4">
-      <h3 className="text-xl font-bold">Staff Schedule</h3>
-      <button className="bg-emerald-500 text-white px-4 py-2 rounded">Add Shift</button>
-    </div>
-  );
-}`;
-
-    // Stamp AST ids
-    const stamped = stampStudioIds("src/components/ScheduleList.tsx", sourceWithGenerics);
+    const source =
+      'import React from "react";\n' +
+      "export function ScheduleList() {\n" +
+      "  const staff = new Set<string>();\n" +
+      '  staff.add("Elena");\n' +
+      '  return <div className="flex p-4"><button className="px-4">Add</button></div>;\n' +
+      "}";
+    const stamped = stampStudioIds("src/components/ScheduleList.tsx", source);
     const elements = scanJsxElements("src/components/ScheduleList.tsx", stamped);
-
-    // Verify generics were not corrupted
-    const hasCorruptedSet = stamped.includes("<string data-studio-id");
-    const divElement = elements.find((el) => el.tagName === "div");
-    const buttonElement = elements.find((el) => el.tagName === "button");
-
-    // Test token mutation
-    const updatedClass = setGroupToken("bg-emerald-500 text-white px-4 py-2 rounded", "paddingX", "px-6");
-    const hasUpdatedPadding = updatedClass.includes("px-6") && !updatedClass.includes("px-4");
-
-    const pass = !hasCorruptedSet && Boolean(divElement) && Boolean(buttonElement) && hasUpdatedPadding;
-    recordTest({
-      name: "6. Visual Inspector AST Stamping & Generic Protection",
-      category: "Visual Inspector",
-      steps: [
-        "Stamp source containing TypeScript generic Set<string>()",
-        "Scan stamped JSX elements via TypeScript AST",
-        "Assert Set<string> is untouched and never stamped with data-studio-id",
-        "Assert real JSX elements (div, h3, button) are properly stamped",
-        "Apply setGroupToken class mutation and verify atomic replacement",
-      ],
-      expected: "Generics untouched, JSX tags stamped, class tokens mutated accurately",
-      actual: `Corrupted generic: ${hasCorruptedSet}, Stamped elements: ${elements.length}, New classes: '${updatedClass}'`,
-      status: pass ? "PASS" : "FAIL",
-    });
-  } catch (err) {
-    recordTest({
-      name: "6. Visual Inspector AST Stamping & Generic Protection",
-      category: "Visual Inspector",
-      steps: ["stampStudioIds & setGroupToken"],
-      expected: "Pass",
-      actual: String(err),
-      status: "FAIL",
-    });
+    const updated = setGroupToken("bg-emerald-500 text-white px-4 py-2 rounded", "paddingX", "px-6");
+    const valid =
+      !stamped.includes("<string data-studio-id") &&
+      elements.some((element) => element.tagName === "div") &&
+      elements.some((element) => element.tagName === "button") &&
+      updated.includes("px-6") &&
+      !updated.includes("px-4");
+    pass(
+      "6. Visual inspector AST stamping and class patch",
+      valid,
+      "TypeScript generics remain unchanged, JSX is stamped, class token changes",
+      "JSX elements=" + elements.length + "; updated classes=" + updated,
+    );
+  } catch (error) {
+    record("6. Visual inspector AST stamping and class patch", "FAIL", "AST patch checks pass", String(error));
   }
 
-  // -------------------------------------------------------------------------
-  // TEST 7: Curated Theme Modernization & Dynamic Tokens
-  // -------------------------------------------------------------------------
+  // 7. Verify actual theme tokens emitted by Sandpack, not a mock string replacement.
   try {
-    const componentCode = `export function Banner() {
-  return <div className="bg-emerald-500 text-emerald-400 hover:text-emerald-300">Banner</div>;
-}`;
-
-    // Modernize hardcoded emerald classes to semantic design tokens
-    const modernized = componentCode
-      .replace(/\bbg-emerald-500\b/g, "bg-primary")
-      .replace(/\btext-emerald-400\b/g, "text-primary")
-      .replace(/\bhover:text-emerald-300\b/g, "hover:text-primary");
-
-    const hasBgPrimary = modernized.includes("bg-primary");
-    const hasTextPrimary = modernized.includes("text-primary");
-    const hasNoEmerald = !modernized.includes("emerald");
-
-    const pass = hasBgPrimary && hasTextPrimary && hasNoEmerald;
-    recordTest({
-      name: "7. Curated Color Theme Modernization & Semantic Tokens",
-      category: "Design System",
-      steps: [
-        "Provide component with hardcoded emerald-500 styling",
-        "Apply theme modernization rules",
-        "Verify replacement with semantic bg-primary and text-primary tokens",
-      ],
-      expected: "Hardcoded Tailwind color classes converted to semantic design tokens",
-      actual: `Result: '${modernized.replace(/\s+/g, " ")}'`,
-      status: pass ? "PASS" : "FAIL",
-    });
-  } catch (err) {
-    recordTest({
-      name: "7. Curated Color Theme Modernization & Semantic Tokens",
-      category: "Design System",
-      steps: ["Apply theme modernization"],
-      expected: "Pass",
-      actual: String(err),
-      status: "FAIL",
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // TEST 8: PROVE RUNTIME SELF-HEALING (End-to-End)
-  // -------------------------------------------------------------------------
-  try {
-    // Intentionally introduce missing hooks & missing icons in a real component
-    const buggyComponent = `export function BookingForm() {
-  const [selectedService, setSelectedService] = useState("haircut");
-  const [date, setDate] = useState("");
-
-  const formattedDate = useMemo(() => {
-    return date ? new Date(date).toLocaleDateString() : "No date";
-  }, [date]);
-
-  return (
-    <div className="p-6 bg-zinc-900 rounded-xl">
-      <Calendar className="h-5 w-5 text-emerald-400" />
-      <span className="text-white font-bold">{selectedService}</span>
-    </div>
-  );
-}`;
-
-    // Step 1: Detect errors via Code Integrity Engine
-    const validationBefore = validateSourceCode("src/components/BookingForm.tsx", buggyComponent);
-    const hasHookDiagnostic = validationBefore.diagnostics.some(
-      (d) => d.code === "REACT_HOOK_NOT_IMPORTED",
-    );
-    const hasClientDiagnostic = validationBefore.diagnostics.some(
-      (d) => d.code === "MISSING_USE_CLIENT",
-    );
-    const hasIconDiagnostic = validationBefore.diagnostics.some(
-      (d) => d.code === "ICON_NOT_IMPORTED",
-    );
-
-    // Step 2: Trigger QA Repair API
-    const qaRes = await fetch(`${baseUrl}/api/orchestrator/qa-fix`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        projectId: "test_proj_salon",
-        diagnostics: validationBefore.diagnostics.map((d) => ({
-          filePath: d.filePath,
-          message: d.message,
-          severity: d.severity,
-          line: d.line,
-        })),
-        files: [
-          {
-            filePath: "src/components/BookingForm.tsx",
-            content: buggyComponent,
-          },
-        ],
-      }),
-    });
-
-    const qaJson = (await qaRes.json()) as {
-      ok: boolean;
-      healed: boolean;
-      diagnosis?: string;
-      files?: { filePath: string; content: string }[];
-    };
-
-    // Step 3: Verify healed file
-    const healedFile = qaJson.files?.[0];
-    const healedContent = healedFile?.content ?? "";
-
-    const hasUseClient = healedContent.startsWith('"use client";');
-    const hasReactHooks = healedContent.includes('import { useState, useMemo } from "react";') ||
-      (healedContent.includes("useState") && healedContent.includes('from "react"'));
-    const hasLucideImport = healedContent.includes('from "lucide-react"') && healedContent.includes("Calendar");
-
-    // Step 4: Re-validate healed code
-    const validationAfter = validateSourceCode("src/components/BookingForm.tsx", healedContent);
-
-    const pass =
-      !validationBefore.valid &&
-      hasHookDiagnostic &&
-      hasClientDiagnostic &&
-      hasIconDiagnostic &&
-      qaJson.ok &&
-      qaJson.healed &&
-      hasUseClient &&
-      hasReactHooks &&
-      hasLucideImport &&
-      validationAfter.valid;
-
-    recordTest({
-      name: "8. PROVE RUNTIME SELF-HEALING: Missing Hooks & Icons Automated Recovery",
-      category: "Self-Healing",
-      steps: [
-        "Construct component with unimported useState, useMemo, Calendar icon, and missing 'use client'",
-        "Run validateSourceCode() -> assert failure with 3 distinct error diagnostics",
-        "Dispatch diagnostics to /api/orchestrator/qa-fix",
-        "Assert 200 OK with healed: true",
-        "Verify 'use client' injected at line 1",
-        "Verify 'import { useState, useMemo } from \"react\"' injected",
-        "Verify 'import { Calendar } from \"lucide-react\"' injected",
-        "Re-run validateSourceCode() on healed file -> assert valid: true, errors: 0",
-      ],
-      expected: "100% automated self-healing without syntax errors or manual intervention",
-      actual: `Diagnostics before: ${validationBefore.errors}. QA healed: ${qaJson.healed}. Healed valid: ${validationAfter.valid}, errors after: ${validationAfter.errors}`,
-      status: pass ? "PASS" : "FAIL",
-      details: {
-        diagnosis: qaJson.diagnosis,
-        healedSnippet: healedContent.slice(0, 200),
+    const theme = {
+      colors: {
+        primary: "#123456",
+        accent: "#abcdef",
+        background: "#faf8f5",
+        surface: "#ffffff",
+        border: "#dddddd",
+        foreground: "#111111",
       },
-    });
-  } catch (err) {
-    recordTest({
-      name: "8. PROVE RUNTIME SELF-HEALING: Missing Hooks & Icons Automated Recovery",
-      category: "Self-Healing",
-      steps: ["Run self-healing pass"],
-      expected: "Pass",
-      actual: String(err),
-      status: "FAIL",
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // TEST 9: FAILURE SCENARIO — Invalid Request Schema Handling
-  // -------------------------------------------------------------------------
-  try {
-    const res = await fetch(`${baseUrl}/api/orchestrator/qa-fix`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        // Missing projectId, diagnostics, files
-        foo: "bar",
-      }),
-    });
-
-    const json = (await res.json()) as { ok: boolean; error?: string; issues?: unknown[] };
-    const pass = res.status === 400 && !json.ok && Array.isArray(json.issues);
-
-    recordTest({
-      name: "9. Failure Scenario: Malformed Request Schema Rejection",
-      category: "Error Handling",
-      steps: [
-        "Send POST /api/orchestrator/qa-fix with invalid JSON body missing required fields",
-        "Assert 400 Bad Request",
-        "Assert ok === false and Zod issues array returned",
-      ],
-      expected: "HTTP 400 with structured Zod validation issues",
-      actual: `Status: ${res.status}, ok: ${json.ok}, issues count: ${json.issues?.length ?? 0}`,
-      status: pass ? "PASS" : "FAIL",
-    });
-  } catch (err) {
-    recordTest({
-      name: "9. Failure Scenario: Malformed Request Schema Rejection",
-      category: "Error Handling",
-      steps: ["Send invalid schema"],
-      expected: "Pass",
-      actual: String(err),
-      status: "FAIL",
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // TEST 10: FAILURE SCENARIO — Syntax Error Detection & Rejection
-  // -------------------------------------------------------------------------
-  try {
-    const invalidSyntaxCode = `export function BadComponent() {
-  const a = {; // Syntax error
-  return <div>Broken</div>;
-}`;
-
-    const validation = validateSourceCode("src/components/BadComponent.tsx", invalidSyntaxCode);
-    const hasSyntaxDiagnostic = validation.diagnostics.some(
-      (d) => d.code === "TYPESCRIPT_PARSE_ERROR" || d.source === "typescript",
+      fontSans: "Inter, sans-serif",
+      fontMono: "JetBrains Mono, monospace",
+      radius: { md: "10px" },
+    };
+    const bundle = buildSandpackFiles(buildSeedProject(), theme);
+    const html = bundle["/public/index.html"]?.code || "";
+    const themeModule = bundle["/studio-theme.ts"]?.code || "";
+    const valid =
+      html.includes("--color-primary: #123456") &&
+      html.includes("--color-background: #faf8f5") &&
+      themeModule.includes('"primary": "#123456"') &&
+      themeModule.includes('"md": "10px"');
+    pass(
+      "7. Real design-token propagation into preview",
+      valid,
+      "Selected design tokens reach generated preview CSS and theme module",
+      "Primary/background/radius tokens propagated: " + String(valid),
     );
-
-    const pass = !validation.valid && hasSyntaxDiagnostic && validation.errors > 0;
-    recordTest({
-      name: "10. Failure Scenario: Syntax Error Detection & Prevention",
-      category: "Error Handling",
-      steps: [
-        "Feed file with invalid syntax 'const a = {;' to validateSourceCode()",
-        "Assert validation.valid === false",
-        "Assert presence of TypeScript parse/syntax diagnostic",
-      ],
-      expected: "Syntax error detected and flagged immediately",
-      actual: `Valid: ${validation.valid}, Errors: ${validation.errors}, Has syntax diagnostic: ${hasSyntaxDiagnostic}`,
-      status: pass ? "PASS" : "FAIL",
-    });
-  } catch (err) {
-    recordTest({
-      name: "10. Failure Scenario: Syntax Error Detection & Prevention",
-      category: "Error Handling",
-      steps: ["Validate syntax"],
-      expected: "Pass",
-      actual: String(err),
-      status: "FAIL",
-    });
+  } catch (error) {
+    record("7. Real design-token propagation into preview", "FAIL", "Theme tokens are emitted", String(error));
   }
 
-  // -------------------------------------------------------------------------
-  // TEST 11: FAILURE SCENARIO — Multi-Error Atomic Healing
-  // -------------------------------------------------------------------------
+  // 10. Syntax error detection.
   try {
-    const multiErrorFile = `export function MultiError() {
-  const [count, setCount] = useState(0);
-  const [query, setQuery] = useState("");
-  const filtered = useMemo(() => [1, 2, 3], []);
-
-  return (
-    <div onClick={() => setCount(count + 1)}>
-      <Search className="h-4 w-4" />
-      <ArrowRight className="h-4 w-4" />
-      <Link href="/details">Details</Link>
-      <span>{count}</span>
-    </div>
-  );
-}`;
-
-    // Multiple errors: 3 hooks, 2 icons, 1 Next Link, missing "use client"
-    const validationBefore = validateSourceCode("src/components/MultiError.tsx", multiErrorFile);
-    const repairOutcome = repairSourceCode("src/components/MultiError.tsx", multiErrorFile);
-    const validationAfter = validateSourceCode("src/components/MultiError.tsx", repairOutcome.content);
-
-    const pass =
-      validationBefore.errors >= 4 &&
-      repairOutcome.repaired &&
-      validationAfter.valid &&
-      validationAfter.errors === 0;
-
-    recordTest({
-      name: "11. Stress Test: Multi-Error Atomic Healing (Hooks + Icons + Link + Directives)",
-      category: "Self-Healing",
-      steps: [
-        "Create component with 3 unimported hooks, 2 unimported icons, 1 unimported Link, and missing 'use client'",
-        "Run validateSourceCode() -> assert >= 4 errors",
-        "Run repairSourceCode() atomic pass",
-        "Assert repaired: true, validationAfter.valid: true, errors: 0",
-      ],
-      expected: "All 4+ errors resolved atomically in a single pass",
-      actual: `Errors before: ${validationBefore.errors}. Repaired: ${repairOutcome.repaired}. Errors after: ${validationAfter.errors}`,
-      status: pass ? "PASS" : "FAIL",
-    });
-  } catch (err) {
-    recordTest({
-      name: "11. Stress Test: Multi-Error Atomic Healing",
-      category: "Self-Healing",
-      steps: ["Run multi-error healing"],
-      expected: "Pass",
-      actual: String(err),
-      status: "FAIL",
-    });
+    const broken = "export function BadComponent() {\n const value = {;\n return <div>Broken</div>;\n}";
+    const result = validateSourceCode("src/components/BadComponent.tsx", broken);
+    const syntaxDiagnostic = result.diagnostics.some(
+      (diagnostic) => diagnostic.source === "typescript" || diagnostic.code === "TYPESCRIPT_PARSE_ERROR",
+    );
+    pass(
+      "10. Syntax error detection",
+      !result.valid && result.errors > 0 && syntaxDiagnostic,
+      "Malformed TSX is rejected with a TypeScript diagnostic",
+      "valid=" + result.valid + "; errors=" + result.errors + "; syntax diagnostic=" + syntaxDiagnostic,
+    );
+  } catch (error) {
+    record("10. Syntax error detection", "FAIL", "Malformed TSX is rejected", String(error));
   }
 
-  // -------------------------------------------------------------------------
-  // FINAL SUMMARY
-  // -------------------------------------------------------------------------
-  console.log("\n==================================================================");
-  console.log("                  VERIFICATION RESULTS SUMMARY                    ");
-  console.log("==================================================================");
-  const total = reports.length;
-  const passed = reports.filter((r) => r.status === "PASS").length;
-  const failed = reports.filter((r) => r.status === "FAIL").length;
-  const blocked = reports.filter((r) => r.status === "BLOCKED").length;
+  // 11. Multi-error deterministic healing.
+  try {
+    const broken =
+      "export function MultiError() {\n" +
+      " const [count, setCount] = useState(0);\n" +
+      " const doubled = useMemo(() => count * 2, [count]);\n" +
+      " return <div><Search /><ArrowRight /><Link href=\"/details\">Details</Link>{doubled}</div>;\n" +
+      "}";
+    const before = validateSourceCode("src/components/MultiError.tsx", broken);
+    const repaired = repairSourceCode("src/components/MultiError.tsx", broken);
+    const after = validateSourceCode("src/components/MultiError.tsx", repaired.content);
+    pass(
+      "11. Multi-error deterministic self-healing",
+      !before.valid && repaired.repaired && repaired.valid && after.valid && after.errors === 0,
+      "Missing hooks, icons, Next Link and client directive are repaired in one pass",
+      "before errors=" + before.errors +
+        "; repaired=" + repaired.repaired +
+        "; after errors=" + after.errors,
+    );
+  } catch (error) {
+    record("11. Multi-error deterministic self-healing", "FAIL", "All supported errors are repaired", String(error));
+  }
 
-  console.log(`Total Tests Run: ${total}`);
-  console.log(`Passed:          ${passed}`);
-  console.log(`Failed:          ${failed}`);
-  console.log(`Blocked:         ${blocked}`);
-  console.log("==================================================================\n");
-
-  if (failed > 0) {
-    process.exit(1);
+  // Validate the project-wide VFS API directly with the seed files.
+  try {
+    const result = validateProjectVfs(buildSeedProject());
+    pass(
+      "12. Seed project-wide integrity validation",
+      result.valid,
+      "Seed project passes project-wide Code Integrity validation",
+      "valid=" + result.valid + "; errors=" + result.errors + "; warnings=" + result.warnings,
+    );
+  } catch (error) {
+    record("12. Seed project-wide integrity validation", "FAIL", "VFS validation completes", String(error));
   }
 }
 
-void runEndToEndVerification();
+async function runLiveChecks() {
+  const liveEnabled = process.env.STUDIO_RUN_LIVE_E2E === "true";
+  const allowSideEffects = process.env.STUDIO_E2E_ALLOW_SIDE_EFFECTS === "true";
+
+  if (!liveEnabled) {
+    blocked("2. AI planning API", "Set STUDIO_RUN_LIVE_E2E=true to call the local server and AI providers.");
+    blocked("3. Task generation API", "Requires live planning output and STUDIO_RUN_LIVE_E2E=true.");
+    blocked("8. QA self-healing API", "Set STUDIO_RUN_LIVE_E2E=true to call the local QA endpoint.");
+    blocked("9. Invalid QA request rejection", "Set STUDIO_RUN_LIVE_E2E=true to call the local QA endpoint.");
+    return;
+  }
+
+  let plannedTasks: any[] = [];
+  let designSystem: any;
+  let projectId = "studio-e2e-" + Date.now();
+
+  // 2. Live planning is explicitly side-effect gated because the route can create/update a Firestore project.
+  if (!allowSideEffects) {
+    blocked("2. AI planning API", "Planning can write a Firestore project. Set STUDIO_E2E_ALLOW_SIDE_EFFECTS=true to opt in.");
+  } else {
+    try {
+      const { response, json } = await postJson("/api/orchestrator/plan", {
+        projectId,
+        prompt: "Build a small salon appointment booking app with services and staff selection",
+        workflowMode: "autonomous",
+      });
+      plannedTasks = Array.isArray(json.tasks) ? json.tasks : [];
+      designSystem = json.designSystem;
+      const ids = new Set(plannedTasks.map((task) => task.id));
+      const dependenciesValid = plannedTasks.every((task) =>
+        (task.dependsOn || []).every((dependency: string) => ids.has(dependency)),
+      );
+      pass(
+        "2. AI planning API",
+        response.ok && json.ok === true && plannedTasks.length > 0 && Boolean(designSystem) && dependenciesValid,
+        "Planning returns a design system and a DAG with valid dependencies",
+        "HTTP " + response.status + "; tasks=" + plannedTasks.length +
+          "; designSystem=" + Boolean(designSystem) + "; dependenciesValid=" + dependenciesValid +
+          (json.error ? "; error=" + json.error : ""),
+      );
+    } catch (error) {
+      record("2. AI planning API", "FAIL", "Planning API returns valid PRD/design/DAG", String(error));
+    }
+  }
+
+  // 3. Convert the persisted GenerationTask shape to the exact ExecuteTaskRequestSchema shape.
+  if (!plannedTasks.length || !designSystem) {
+    blocked("3. Task generation API", "A successful live planning result is required first.");
+  } else {
+    try {
+      const planned = plannedTasks[0];
+      const task: DagTaskNode = {
+        taskId: planned.id,
+        title: planned.title,
+        description: planned.description || "",
+        agentRole: planned.agentRole,
+        provider: planned.provider || "groq",
+        order: planned.order,
+        targetFilePath: planned.targetFilePath,
+        dependencies: planned.dependsOn || [],
+        requiredContextFiles: planned.requiredContextFiles || [],
+        exportedSymbols: planned.exportedSymbols || [],
+      };
+      const { response, json } = await postJson("/api/orchestrator/execute-task", {
+        projectId,
+        task,
+        designSystem,
+        contextFiles: [],
+      });
+      const integrity = json.file?.content
+        ? validateSourceCode(json.file.filePath, json.file.content)
+        : null;
+      pass(
+        "3. Task generation API and Code Integrity",
+        response.ok && json.ok === true && Boolean(json.file?.content) && Boolean(integrity?.valid),
+        "Schema-valid task generates a file that passes Code Integrity",
+        "HTTP " + response.status + "; file=" + (json.file?.filePath || "none") +
+          "; integrity=" + (integrity?.valid ?? false) +
+          (json.error ? "; error=" + json.error : ""),
+      );
+    } catch (error) {
+      record("3. Task generation API and Code Integrity", "FAIL", "Task generation returns valid source", String(error));
+    }
+  }
+
+  // 8. The deterministic fast path should heal this input without an AI provider call or database write.
+  try {
+    const filePath = "src/components/BookingForm.tsx";
+    const buggy =
+      "export function BookingForm() {\n" +
+      ' const [service, setService] = useState("haircut");\n' +
+      " const formatted = useMemo(() => service.toUpperCase(), [service]);\n" +
+      " return <div><Calendar />{formatted}</div>;\n" +
+      "}";
+    const before = validateSourceCode(filePath, buggy);
+    const diagnostics = before.diagnostics.map((diagnostic) => ({
+      filePath: diagnostic.filePath,
+      line: diagnostic.line,
+      column: diagnostic.column,
+      message: diagnostic.message,
+      source: diagnostic.source === "ast" ? "typescript" : diagnostic.source === "build" ? "sandpack" : diagnostic.source,
+    }));
+    const { response, json } = await postJson("/api/orchestrator/qa-fix", {
+      projectId,
+      diagnostics,
+      files: [{ filePath, content: buggy }],
+    });
+    const healed = json.files?.find((file: any) => file.filePath === filePath);
+    const after = healed?.content ? validateSourceCode(filePath, healed.content) : null;
+    pass(
+      "8. QA API deterministic self-healing",
+      response.ok && json.ok === true && json.healed === true && Boolean(after?.valid),
+      "QA endpoint returns repaired source that passes Code Integrity",
+      "HTTP " + response.status + "; healed=" + Boolean(json.healed) +
+        "; validAfter=" + (after?.valid ?? false) +
+        (json.error ? "; error=" + json.error : ""),
+    );
+  } catch (error) {
+    record("8. QA API deterministic self-healing", "FAIL", "QA endpoint returns valid healed source", String(error));
+  }
+
+  // 9. Schema validation runs before auth, so malformed input must be rejected as 400.
+  try {
+    const response = await fetch(baseUrl + "/api/orchestrator/qa-fix", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ foo: "bar" }),
+    });
+    const json = (await response.json()) as Record<string, any>;
+    pass(
+      "9. QA API malformed request rejection",
+      response.status === 400 && json.ok === false && Array.isArray(json.issues),
+      "Invalid request returns HTTP 400 with Zod issues",
+      "HTTP " + response.status + "; issues=" + (json.issues?.length || 0),
+    );
+  } catch (error) {
+    record("9. QA API malformed request rejection", "FAIL", "Invalid request returns structured 400", String(error));
+  }
+}
+
+async function main() {
+  runLocalChecks();
+  await runLiveChecks();
+
+  const passed = reports.filter((report) => report.status === "PASS").length;
+  const failed = reports.filter((report) => report.status === "FAIL").length;
+  const blockedCount = reports.filter((report) => report.status === "BLOCKED").length;
+  console.log("\n=== Studio verification summary ===");
+  console.log("Total: " + reports.length + " | PASS: " + passed + " | FAIL: " + failed + " | BLOCKED: " + blockedCount);
+
+  if (failed > 0) process.exitCode = 1;
+}
+
+void main().catch((error) => {
+  console.error("Verification runner crashed:", error);
+  process.exitCode = 1;
+});
