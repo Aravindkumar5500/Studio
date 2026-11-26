@@ -6,3 +6,6 @@ node_modules/
 !.env.example
 *.tsbuildinfo
 next-env.d.ts
+.gemini/
+AGENTS.md
+GEMINI.md
