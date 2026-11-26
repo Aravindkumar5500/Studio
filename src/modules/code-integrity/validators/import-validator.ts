@@ -52,6 +52,9 @@ export interface ImportValidationOutcome {
  * Deduplicates conflicting import bindings across declarations (e.g. `import Link from "next/link"`
  * colliding with `import { Link, Menu } from "lucide-react"`) and fixes `<Link href="...">`
  * accidentally imported from `lucide-react` instead of `next/link`.
+ *
+ * When `Link` is used as both a navigation element (with `href`) and a Lucide icon, the
+ * navigation `Link` from `next/link` wins and the Lucide `Link` is replaced with `Link2`.
  */
 function deduplicateAndResolveImportConflicts(source: string, filePath: string): string {
   const sf = ts.createSourceFile(
@@ -64,13 +67,19 @@ function deduplicateAndResolveImportConflicts(source: string, filePath: string):
 
   // Detect whether JSX uses <Link href=...> (navigation link rather than Lucide Link icon)
   let hasJsxLinkWithHref = false;
+  // Detect whether JSX uses <Link> without href (icon usage)
+  let hasJsxLinkAsIcon = false;
   function checkJsxLink(node: ts.Node) {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       if (node.tagName.getText(sf) === "Link") {
         const hasHref = node.attributes.properties.some(
           (attr) => ts.isJsxAttribute(attr) && attr.name.getText(sf) === "href",
         );
-        if (hasHref) hasJsxLinkWithHref = true;
+        if (hasHref) {
+          hasJsxLinkWithHref = true;
+        } else {
+          hasJsxLinkAsIcon = true;
+        }
       }
     }
     ts.forEachChild(node, checkJsxLink);
@@ -84,6 +93,17 @@ function deduplicateAndResolveImportConflicts(source: string, filePath: string):
     (d) => d.moduleSpecifier.getText(sf).replace(/['"]/g, "") === "next/link",
   );
 
+  const hasLucideLinkImport = importDecls.some((d) => {
+    const spec = d.moduleSpecifier.getText(sf).replace(/['"]/g, "");
+    if (spec !== "lucide-react") return false;
+    const clause = d.importClause;
+    if (!clause?.namedBindings || !ts.isNamedImports(clause.namedBindings)) return false;
+    return clause.namedBindings.elements.some((el) => el.name.text === "Link");
+  });
+
+  // Determine whether Link is used in a navigation context (next/link takes precedence)
+  const linkConflict = hasLucideLinkImport && (hasNextLinkImport || hasJsxLinkWithHref);
+
   // Track seen local binding names; prefer next/link for `Link` if both next/link and lucide-react exist
   const seenBindings = new Set<string>();
   if (hasNextLinkImport || hasJsxLinkWithHref) {
@@ -92,6 +112,8 @@ function deduplicateAndResolveImportConflicts(source: string, filePath: string):
 
   const edits: { start: number; end: number; replacement: string }[] = [];
   let needInjectNextLink = false;
+  // If Link icon usage exists and there's a conflict, we need to alias it to Link2
+  let needAliasLinkIcon: boolean = linkConflict && hasJsxLinkAsIcon;
 
   for (const decl of importDecls) {
     const clause = decl.importClause;
@@ -128,6 +150,12 @@ function deduplicateAndResolveImportConflicts(source: string, filePath: string):
             changed = true;
             if (!hasNextLinkImport && hasJsxLinkWithHref) {
               needInjectNextLink = true;
+            }
+            // If used as icon too, add Link2 alias instead of dropping entirely
+            if (hasJsxLinkAsIcon && !seenBindings.has("Link2")) {
+              keptNamed.push("Link2");
+              seenBindings.add("Link2");
+              needAliasLinkIcon = true;
             }
             continue;
           }
@@ -189,6 +217,22 @@ function deduplicateAndResolveImportConflicts(source: string, filePath: string):
     } else {
       next = `${linkImport}${next}`;
     }
+  }
+
+  // Replace <Link ... /> icon usages with <Link2 ... /> when aliased
+  if (needAliasLinkIcon) {
+    // Replace JSX <Link (without href) with <Link2, and </Link> icon closings
+    // We do a targeted replacement: <Link followed by space or /> but NOT href
+    next = next.replace(
+      /(<\/?)Link(\s*(?:\/>|>))/g,
+      (match, open, close, offset) => {
+        // Check if this is a navigation Link (has href= nearby) or icon Link
+        const after = next.slice(offset, offset + match.length + 100);
+        const isNav = /^<\/?Link[\s>]/.test(match) && /\bhref\s*=/.test(after.slice(0, after.indexOf(">")));
+        if (isNav) return match;
+        return `${open}Link2${close}`;
+      },
+    );
   }
 
   return next;
