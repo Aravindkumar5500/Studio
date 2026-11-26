@@ -130,7 +130,7 @@ export const productAgent = defineAgent({
   schema: PrdSchema,
   system: PRODUCT_AGENT_SYSTEM,
   temperature: 0.2,
-  maxOutputTokens: 8192,
+  maxOutputTokens: 16384,
   buildUserPrompt: (input: ProductAgentInput) =>
     [
       "Create a complete PRD from the user's original request.",
