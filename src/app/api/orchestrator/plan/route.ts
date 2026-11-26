@@ -126,7 +126,7 @@ export async function POST(request: Request) {
       if (existing) {
         existing.title = `Build ${route.path === "/" ? "home" : route.path} page`;
         existing.description = route.purpose;
-        existing.exportedSymbols = ["export default function Page"];
+        if (!existing.exportedSymbols.length) existing.exportedSymbols = ["export default function Page"];
         continue;
       }
 
@@ -325,7 +325,7 @@ function normalizeRoute(route: string): string {
     throw new Error(`Invalid PRD route: "${route}" must be an absolute pathname without query/hash.`);
   }
   const segments = trimmed.split("/").filter(Boolean).map((segment) => {
-    if (segment === "." || segment === ".." || !/^[a-zA-Z0-9_.\-[\]]+$/.test(segment)) {
+    if (segment === "." || segment === ".." || !/^(?::[a-zA-Z0-9_]+|[a-zA-Z0-9_.\-[\]]+)$/.test(segment)) {
       throw new Error(`Invalid PRD route: "${route}" contains an unsupported segment "${segment}".`);
     }
     return segment.startsWith(":") ? `[${segment.slice(1)}]` : segment;
