@@ -109,6 +109,7 @@ export async function POST(request: Request) {
     }
 
     const routeFilePaths = new Set(routeRecords.map((route) => normalizePath(route.filePath)));
+    rawTasks = rawTasks.filter((task) => !isPageFile(task.targetFilePath) || routeFilePaths.has(normalizePath(task.targetFilePath)));
     const pageTasks = rawTasks.filter((task) => isPageFile(task.targetFilePath));
     const canonicalPageTasks = new Map<string, DagTaskNode>();
 
@@ -157,6 +158,12 @@ export async function POST(request: Request) {
     const targetPaths = new Set<string>();
     for (const task of rawTasks) {
       const taskPath = normalizePath(task.targetFilePath);
+      if (!task.targetFilePath.startsWith("src/") || task.targetFilePath.split(/[\\/]/).some((part) => part === "." || part === "..")) {
+        return NextResponse.json(
+          { ok: false, error: `The architect produced an unsafe or unsupported target path "${task.targetFilePath}".` },
+          { status: 502 },
+        );
+      }
       if (taskIds.has(task.taskId)) {
         return NextResponse.json(
           { ok: false, error: `The architect produced duplicate task id "${task.taskId}".` },
