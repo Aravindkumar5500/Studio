@@ -191,6 +191,7 @@ export function TopNavBar({
 
       {/* Right: View switcher + Export/Deploy actions */}
       <div className="flex items-center gap-2.5">
+        <ThemeToggle />
         {/* Modern Segmented View Tabs */}
         <nav className="flex items-center rounded-lg border border-white/[0.08] bg-zinc-950/60 p-0.5">
           {VIEW_TABS.map((tab) => {
