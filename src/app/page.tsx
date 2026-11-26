@@ -4,59 +4,23 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  Sparkles,
-  ArrowRight,
-  Layers,
-  LayoutDashboard,
-  Globe,
-  Briefcase,
-  ShoppingCart,
-  Calendar,
-  Play,
-  Trash2,
-  Clock,
-  Zap,
-  FolderKanban,
-  CheckCircle2,
-  ExternalLink,
+  ArrowRight, ArrowUpRight, BriefcaseBusiness, CalendarDays, Check,
+  Clock3, Code2, Command, FolderOpen, Globe2, Layers3, LayoutDashboard,
+  ShoppingBag, Trash2, Zap
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 interface SavedProject {
-  id: string;
-  name: string;
-  prompt: string;
-  category: string;
-  mode: "guided" | "autonomous";
-  createdAt: string;
-  isFreshProject?: boolean;
+  id: string; name: string; prompt: string; category: string;
+  mode: "guided" | "autonomous"; createdAt: string; isFreshProject?: boolean;
 }
 
 const CATEGORIES = [
-  { id: "Website Builder", label: "Website Builder", icon: Globe, placeholder: "e.g. Modern landing page with hero, features grid, pricing table, and testimonials" },
-  { id: "CRM / Dashboard", label: "CRM / Dashboard", icon: LayoutDashboard, placeholder: "e.g. Build a clean Sales CRM dashboard with leads table and pipeline stats" },
-  { id: "Business Site", label: "Business Site", icon: Briefcase, placeholder: "e.g. Digital consulting agency site with services breakdown, case studies, and contact modal" },
-  { id: "E-Commerce", label: "E-Commerce", icon: ShoppingCart, placeholder: "e.g. Minimalist storefront with product catalog, filter tabs, cart drawer, and checkout summary" },
-  { id: "Booking System", label: "Booking System", icon: Calendar, placeholder: "e.g. Salon appointment booking SaaS with specialist picker, calendar slots, and confirmation flow" },
-];
-
-const QUICK_STARTERS = [
-  {
-    category: "CRM / Dashboard",
-    prompt: "Build a clean Sales CRM dashboard with leads table and pipeline stats",
-  },
-  {
-    category: "Booking System",
-    prompt: "Salon & spa appointment booking app with staff selector, calendar slots, and service tiers",
-  },
-  {
-    category: "Business Site",
-    prompt: "Creative design agency business website with portfolio showcase, client logos, and contact section",
-  },
-  {
-    category: "E-Commerce",
-    prompt: "Modern sneaker e-commerce shop with product grid, interactive cart drawer, and review ratings",
-  },
+  { id: "Website Builder", label: "Website", icon: Globe2, hint: "A marketing site, portfolio, or product page" },
+  { id: "CRM / Dashboard", label: "Dashboard", icon: LayoutDashboard, hint: "A workspace for data, teams, and operations" },
+  { id: "Business Site", label: "Business app", icon: BriefcaseBusiness, hint: "A service business or company website" },
+  { id: "E-Commerce", label: "Commerce", icon: ShoppingBag, hint: "A storefront, catalogue, or checkout" },
+  { id: "Booking System", label: "Booking", icon: CalendarDays, hint: "Appointments, schedules, and reservations" },
 ];
 
 export default function StudioDashboardPage() {
@@ -67,369 +31,155 @@ export default function StudioDashboardPage() {
   const [projects, setProjects] = React.useState<SavedProject[]>([]);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
-  // Hydrate recent projects from localStorage
   React.useEffect(() => {
     try {
       const raw = localStorage.getItem("studio_recent_projects");
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          setProjects(parsed);
-        }
+        if (Array.isArray(parsed)) setProjects(parsed);
       }
-    } catch (e) {
-      console.warn("Could not load recent projects:", e);
-    }
+    } catch (error) { console.warn("Could not load recent projects:", error); }
   }, []);
 
-  const handleSelectCategory = (catId: string) => {
-    setCategory(catId);
-    const catObj = CATEGORIES.find((c) => c.id === catId);
-    if (!prompt.trim() && catObj) {
-      setPrompt(catObj.placeholder.replace(/^e\.g\.\s*/, ""));
-    }
-  };
-
-  const handleLaunchProject = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  function launchProject(event?: React.FormEvent) {
+    event?.preventDefault();
     const cleanPrompt = prompt.trim();
     if (!cleanPrompt || isSubmitting) return;
-
     setIsSubmitting(true);
-    const projectId = `proj_${Date.now()}`;
-
-    // Derive a clean short title
+    const projectId = "proj_" + Date.now();
     const firstSentence = cleanPrompt.split(/[.!?\n]/)[0].trim();
-    const derivedName =
-      firstSentence.length > 40
-        ? firstSentence.slice(0, 38).trim() + "..."
-        : firstSentence || `${category} App`;
-
-    const newProject: SavedProject = {
-      id: projectId,
-      name: derivedName,
-      prompt: cleanPrompt,
-      category,
-      mode,
-      createdAt: new Date().toISOString(),
-      isFreshProject: true,
-    };
-
+    const name = firstSentence.length > 40 ? firstSentence.slice(0, 38).trim() + "…" : firstSentence || category + " app";
+    const project: SavedProject = { id: projectId, name, prompt: cleanPrompt, category, mode, createdAt: new Date().toISOString(), isFreshProject: true };
     try {
-      // Save specific project info
-      localStorage.setItem(`studio_project_${projectId}`, JSON.stringify(newProject));
-      // Update recent projects list
-      const updatedList = [newProject, ...projects.filter((p) => p.id !== projectId)].slice(0, 12);
-      localStorage.setItem("studio_recent_projects", JSON.stringify(updatedList));
-      setProjects(updatedList);
-    } catch (err) {
-      console.warn("Failed saving project locally:", err);
-    }
-
-    // Redirect to studio workspace
-    router.push(
-      `/studio/${projectId}?prompt=${encodeURIComponent(cleanPrompt)}&mode=${mode}&category=${encodeURIComponent(category)}`,
-    );
-  };
-
-  const handleDeleteProject = (e: React.MouseEvent, id: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    try {
-      localStorage.removeItem(`studio_project_${id}`);
-      const updated = projects.filter((p) => p.id !== id);
+      localStorage.setItem("studio_project_" + projectId, JSON.stringify(project));
+      const updated = [project, ...projects.filter((item) => item.id !== projectId)].slice(0, 12);
       localStorage.setItem("studio_recent_projects", JSON.stringify(updated));
       setProjects(updated);
-    } catch {}
-  };
+    } catch (error) { console.warn("Could not save project locally:", error); }
+    router.push("/studio/" + projectId + "?prompt=" + encodeURIComponent(cleanPrompt) + "&mode=" + mode + "&category=" + encodeURIComponent(category));
+  }
+
+  function deleteProject(event: React.MouseEvent, id: string) {
+    event.preventDefault(); event.stopPropagation();
+    try {
+      localStorage.removeItem("studio_project_" + id);
+      const updated = projects.filter((item) => item.id !== id);
+      localStorage.setItem("studio_recent_projects", JSON.stringify(updated));
+      setProjects(updated);
+    } catch (error) { console.warn("Could not remove project:", error); }
+  }
+
+  const selectedCategory = CATEGORIES.find((item) => item.id === category) || CATEGORIES[1];
 
   return (
-    <div className="min-h-screen bg-canvas text-foreground flex flex-col selection:bg-emerald-500/30 selection:text-emerald-200">
-      {/* Top Header */}
-      <header className="border-b border-white/[0.08] bg-panel/80 backdrop-blur-md sticky top-0 z-50">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-          <Link href="/" className="flex items-center gap-3 group">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-teal-600 shadow-md shadow-emerald-500/20 group-hover:scale-105 transition-transform">
-              <Sparkles className="h-5 w-5 text-zinc-950" />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-base font-bold tracking-tight text-white">Studio</span>
-              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 font-mono">
-                v2.0
-              </span>
-            </div>
+    <div className="studio-shell">
+      <header className="studio-header sticky top-0 z-40">
+        <div className="mx-auto flex h-full max-w-[1440px] items-center justify-between px-5 sm:px-8">
+          <Link href="/" className="flex items-center gap-3" aria-label="Studio home">
+            <span className="studio-brand-mark"><Layers3 className="h-[17px] w-[17px]" /></span>
+            <span className="font-display text-[17px] font-bold tracking-tight">studio<span className="studio-muted">.</span></span>
+            <span className="hidden border-l studio-rule pl-3 text-[10px] font-medium uppercase tracking-[.14em] studio-muted sm:inline">Build environment</span>
           </Link>
-
-          <div className="flex items-center gap-4">
-            <a
-              href="#my-projects"
-              className="text-xs font-medium text-zinc-400 hover:text-white transition-colors"
-            >
-              My Projects
-            </a>
-            <Link
-              href="/studio/demo"
-              className="inline-flex h-9 items-center gap-2 rounded-xl border border-white/[0.1] bg-zinc-900/80 px-3.5 text-xs font-medium text-zinc-200 shadow-sm transition-all hover:bg-zinc-800 hover:text-white hover:border-white/[0.2]"
-            >
-              <Layers className="h-3.5 w-3.5 text-emerald-400" />
-              <span>Open Demo (Nimbus)</span>
-            </Link>
-          </div>
+          <nav className="flex items-center gap-2 sm:gap-3">
+            <a href="#projects" className="hidden text-xs font-semibold studio-muted transition-colors hover:text-foreground sm:inline">Your work</a>
+            <Link href="/studio/demo" className="studio-quiet-action"><Layers3 className="h-3.5 w-3.5" /> Open demo <ArrowUpRight className="h-3 w-3" /></Link>
+            <ThemeToggle />
+          </nav>
         </div>
       </header>
 
-      {/* Main Hero & Prompt Builder */}
-      <main className="flex-1 flex flex-col items-center px-6 pt-12 pb-20">
-        <section className="w-full max-w-3xl flex flex-col items-center text-center gap-6">
-          {/* Badge */}
-          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-1.5 text-xs font-medium text-emerald-300 backdrop-blur-sm shadow-sm">
-            <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
-            <span>Prompt-First AI App Builder · Next.js 14 + Sandpack</span>
-          </div>
-
-          {/* Heading */}
-          <div className="space-y-3">
-            <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-white leading-tight">
-              What do you want to build today?
+      <main className="mx-auto w-full max-w-[1440px] px-5 pb-20 pt-10 sm:px-8 sm:pt-14">
+        <section className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-16">
+          <div className="max-w-[850px]">
+            <p className="studio-kicker mb-5 flex items-center gap-2"><span className="h-px w-7 bg-current" /> A workspace for making software</p>
+            <h1 className="font-display max-w-[780px] text-[clamp(2.7rem,6vw,5.35rem)] font-semibold leading-[.99] tracking-[-.065em]">
+              Start with an idea.<br /><span className="studio-muted">Leave with a working app.</span>
             </h1>
-            <p className="text-sm sm:text-base text-zinc-400 max-w-xl mx-auto leading-relaxed">
-              Describe your application in plain language. Studio orchestrates AI agents to plan the architecture and write live, production-grade Next.js components.
+            <p className="mt-6 max-w-[590px] text-[15px] leading-7 studio-muted">
+              Shape the product, make the interface, and work directly with the code. Studio keeps the whole process in one place — with you in control.
             </p>
-          </div>
 
-          {/* Category Pills */}
-          <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-            {CATEGORIES.map((cat) => {
-              const Icon = cat.icon;
-              const isSelected = category === cat.id;
-              return (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => handleSelectCategory(cat.id)}
-                  className={cn(
-                    "flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium transition-all duration-200 border",
-                    isSelected
-                      ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200 shadow-sm shadow-emerald-500/20"
-                      : "border-white/[0.08] bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-white/[0.16]",
-                  )}
-                >
-                  <Icon className={cn("h-3.5 w-3.5", isSelected ? "text-emerald-400" : "text-zinc-500")} />
-                  <span>{cat.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Prompt Box Card */}
-          <form
-            onSubmit={handleLaunchProject}
-            className="w-full rounded-2xl border border-white/[0.12] bg-zinc-950/80 p-3 shadow-2xl backdrop-blur-xl ring-1 ring-white/[0.05] flex flex-col gap-3 text-left transition-all focus-within:border-emerald-500/50 focus-within:ring-2 focus-within:ring-emerald-500/20"
-          >
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  handleLaunchProject();
-                }
-              }}
-              placeholder={
-                CATEGORIES.find((c) => c.id === category)?.placeholder ||
-                "e.g. Real Estate CRM with leads pipeline, Salon Booking SaaS, Agency Business Site..."
-              }
-              rows={4}
-              className="w-full resize-none rounded-xl bg-transparent p-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none leading-relaxed"
-            />
-
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] pt-3 px-1">
-              {/* Mode Toggle */}
-              <div className="flex items-center gap-1 rounded-xl border border-white/[0.08] bg-zinc-900/90 p-1">
-                <button
-                  type="button"
-                  onClick={() => setMode("guided")}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-all",
-                    mode === "guided"
-                      ? "bg-zinc-800 text-white shadow-sm ring-1 ring-white/[0.08]"
-                      : "text-zinc-400 hover:text-zinc-200",
-                  )}
-                  title="Review PRD spec & architecture approvals before generating code"
-                >
-                  <span>Guided</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode("autonomous")}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-all",
-                    mode === "autonomous"
-                      ? "bg-gradient-to-r from-emerald-500/25 to-teal-500/25 text-emerald-200 ring-1 ring-emerald-500/40"
-                      : "text-zinc-400 hover:text-zinc-200",
-                  )}
-                  title="Auto-execute all build tasks directly into Sandpack live preview"
-                >
-                  <Zap className="h-3 w-3 text-emerald-400" />
-                  <span>Autonomous</span>
-                </button>
+            <form onSubmit={launchProject} className="studio-surface mt-9 overflow-hidden rounded-xl shadow-[0_14px_50px_rgba(25,28,26,.06)]">
+              <div className="flex items-center justify-between border-b studio-rule px-5 py-3.5">
+                <span className="studio-kicker">New project</span>
+                <span className="flex items-center gap-1.5 text-[10px] studio-muted"><span className="h-1.5 w-1.5 rounded-full bg-emerald-600" /> Ready when you are</span>
               </div>
+              <div className="px-5 pt-4 sm:px-6">
+                <label htmlFor="project-brief" className="mb-2 block text-xs font-semibold">What are we making?</label>
+                <textarea id="project-brief" value={prompt} onChange={(event) => setPrompt(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); launchProject(); } }}
+                  placeholder={"Describe the product, who it is for, and what it needs to do. For example: " + selectedCategory.hint.toLowerCase() + "…"}
+                  rows={4} className="studio-input min-h-[116px] text-[14px] leading-7" aria-describedby="prompt-hint" />
+                <div id="prompt-hint" className="mt-2 flex items-center gap-2 text-[10px] studio-muted"><Command className="h-3 w-3" /> Press ⌘ Enter to start building</div>
+              </div>
+              <div className="mt-5 flex flex-col gap-4 border-t studio-rule px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                <div className="flex flex-wrap gap-1.5" aria-label="Build mode">
+                  <button type="button" onClick={() => setMode("guided")} aria-pressed={mode === "guided"} className={"rounded-md px-3 py-2 text-xs font-semibold transition-colors " + (mode === "guided" ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]" : "studio-muted hover:bg-[var(--surface-muted)]")}>Guided review</button>
+                  <button type="button" onClick={() => setMode("autonomous")} aria-pressed={mode === "autonomous"} className={"rounded-md px-3 py-2 text-xs font-semibold transition-colors " + (mode === "autonomous" ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]" : "studio-muted hover:bg-[var(--surface-muted)]")}><Zap className="mr-1 inline h-3 w-3" /> Autonomous</button>
+                </div>
+                <button type="submit" disabled={!prompt.trim() || isSubmitting} className="studio-action">{isSubmitting ? "Preparing workspace…" : "Create project"} <ArrowRight className="h-4 w-4" /></button>
+              </div>
+            </form>
 
-              {/* Submit CTA */}
-              <button
-                type="submit"
-                disabled={!prompt.trim() || isSubmitting}
-                className={cn(
-                  "inline-flex h-10 items-center gap-2 rounded-xl px-5 text-xs font-bold transition-all shadow-md",
-                  !prompt.trim() || isSubmitting
-                    ? "bg-zinc-800 text-zinc-500 cursor-not-allowed border border-white/[0.05]"
-                    : "bg-emerald-500 text-zinc-950 shadow-emerald-500/25 hover:bg-emerald-400 hover:scale-[1.02] active:scale-[0.98]",
-                )}
-              >
-                <span>{isSubmitting ? "Orchestrating..." : "Generate Application"}</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </form>
-
-          {/* Quick Starter Suggestions */}
-          <div className="w-full flex flex-col items-center gap-2 pt-1">
-            <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">
-              Popular Starters
-            </span>
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              {QUICK_STARTERS.map((starter, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => {
-                    setCategory(starter.category);
-                    setPrompt(starter.prompt);
-                  }}
-                  className="rounded-lg border border-white/[0.06] bg-zinc-900/40 px-3 py-1.5 text-xs text-zinc-400 hover:text-emerald-300 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-all text-left"
-                >
-                  {starter.prompt}
-                </button>
-              ))}
+            <div className="mt-6">
+              <p className="mb-3 text-[11px] font-semibold studio-muted">Choose a starting point</p>
+              <div className="flex flex-wrap gap-2">
+                {CATEGORIES.map(({ id, label, icon: Icon }) => (
+                  <button key={id} type="button" aria-pressed={category === id} onClick={() => setCategory(id)} className="studio-category flex items-center gap-2">
+                    <Icon className="h-3.5 w-3.5" /> {label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
+
+          <aside className="flex flex-col gap-5 lg:pt-1">
+            <div className="studio-surface rounded-xl p-5">
+              <div className="flex items-center justify-between"><span className="studio-kicker">A considered workflow</span><Code2 className="h-4 w-4 studio-muted" /></div>
+              <div className="mt-5 space-y-4">
+                <div className="flex gap-3"><span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-[var(--surface-muted)] text-xs font-bold">1</span><div><p className="text-sm font-semibold">Plan the product</p><p className="mt-1 text-xs leading-5 studio-muted">Turn the brief into requirements, design direction, and a build plan.</p></div></div>
+                <div className="flex gap-3"><span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-[var(--surface-muted)] text-xs font-bold">2</span><div><p className="text-sm font-semibold">Build in context</p><p className="mt-1 text-xs leading-5 studio-muted">Generate real files and see changes in the live preview.</p></div></div>
+                <div className="flex gap-3"><span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-[var(--surface-muted)] text-xs font-bold">3</span><div><p className="text-sm font-semibold">Refine and ship</p><p className="mt-1 text-xs leading-5 studio-muted">Edit visually or in code, then export or deploy your project.</p></div></div>
+              </div>
+            </div>
+            <div className="studio-surface-muted rounded-xl p-5">
+              <p className="studio-kicker">Built for real work</p>
+              <p className="mt-3 font-display text-2xl font-semibold leading-tight">Your code stays yours.</p>
+              <p className="mt-2 text-xs leading-6 studio-muted">Inspect every generated file, make direct edits, keep checkpoints, and take the project with you.</p>
+              <div className="mt-5 flex items-center gap-2 text-[11px] font-semibold"><Check className="h-3.5 w-3.5 text-[var(--accent-strong)]" /> No black-box handoff</div>
+            </div>
+          </aside>
         </section>
 
-        {/* My Projects & Showcase Section */}
-        <section id="my-projects" className="w-full max-w-5xl pt-20 flex flex-col gap-6">
-          <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
-            <div className="flex items-center gap-2.5">
-              <FolderKanban className="h-5 w-5 text-emerald-400" />
-              <h2 className="text-lg font-bold tracking-tight text-white">My Projects & Workspaces</h2>
-            </div>
-            <span className="text-xs text-zinc-500">
-              {projects.length + 1} workspace{projects.length !== 0 ? "s" : ""} available
-            </span>
+        <section id="projects" className="mt-20 scroll-mt-24">
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-3 border-b studio-rule pb-4">
+            <div><p className="studio-kicker">Project library</p><h2 className="mt-2 font-display text-2xl font-semibold">Pick up where you left off</h2></div>
+            <span className="text-xs studio-muted">{projects.length} saved project{projects.length === 1 ? "" : "s"}</span>
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Nimbus Interactive Demo Card (Always Prominent) */}
-            <div className="group relative rounded-2xl border border-emerald-500/30 bg-gradient-to-b from-emerald-950/20 to-zinc-950/90 p-5 shadow-lg backdrop-blur-md flex flex-col justify-between transition-all hover:border-emerald-500/60 hover:shadow-emerald-500/10">
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
-                    <Sparkles className="h-2.5 w-2.5" />
-                    Interactive Demo
-                  </span>
-                  <span className="text-[10px] font-mono text-zinc-500">v1.0 Ready</span>
-                </div>
-                <h3 className="text-base font-bold text-white group-hover:text-emerald-300 transition-colors">
-                  Nimbus SaaS Landing
-                </h3>
-                <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
-                  Pre-configured Next.js showcase app with 9 modular components, live color token switching, and AST visual element inspection.
-                </p>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <Link href="/studio/demo" className="studio-project-card group">
+              <div><div className="flex items-center justify-between"><span className="studio-kicker">Sample workspace</span><ArrowUpRight className="h-4 w-4 studio-muted transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" /></div>
+                <h3 className="mt-8 font-display text-xl font-semibold">Nimbus — product site</h3>
+                <p className="mt-2 text-xs leading-6 studio-muted">Explore a working example with live preview, editable components, and visual inspection.</p>
               </div>
-
-              <div className="mt-6 pt-4 border-t border-white/[0.06] flex items-center justify-between">
-                <span className="text-[10px] text-zinc-500 font-mono">Demo Workspace</span>
-                <Link
-                  href="/studio/demo"
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-zinc-950 shadow-sm hover:bg-emerald-400 transition-all"
-                >
-                  <span>Open Demo</span>
-                  <ExternalLink className="h-3 w-3" />
-                </Link>
-              </div>
-            </div>
-
-            {/* User Saved Projects */}
-            {projects.map((proj) => (
-              <div
-                key={proj.id}
-                className="group relative rounded-2xl border border-white/[0.08] bg-zinc-950/70 p-5 shadow-md backdrop-blur-md flex flex-col justify-between transition-all hover:border-white/[0.2] hover:bg-zinc-900/40"
-              >
-                <div>
-                  <div className="flex items-center justify-between gap-2 mb-3">
-                    <span className="inline-flex items-center gap-1 rounded-full border border-white/[0.1] bg-zinc-900 px-2 py-0.5 text-[10px] font-medium text-zinc-300">
-                      {proj.category || "Application"}
-                    </span>
-                    <span className="text-[10px] font-mono text-zinc-500 flex items-center gap-1">
-                      <Clock className="h-2.5 w-2.5" />
-                      {new Date(proj.createdAt).toLocaleDateString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </span>
-                  </div>
-                  <h3 className="text-base font-bold text-white group-hover:text-emerald-300 transition-colors line-clamp-1">
-                    {proj.name}
-                  </h3>
-                  <p className="mt-2 text-xs text-zinc-400 leading-relaxed line-clamp-3">
-                    {proj.prompt}
-                  </p>
+              <div className="mt-7 flex items-center justify-between border-t studio-rule pt-4 text-[10px] studio-muted"><span>DEMO PROJECT</span><span>Open workspace ↗</span></div>
+            </Link>
+            {projects.map((project) => (
+              <article key={project.id} className="studio-project-card">
+                <div><div className="flex items-center justify-between gap-2"><span className="studio-kicker truncate">{project.category || "Application"}</span><span className="flex shrink-0 items-center gap-1 text-[10px] studio-muted"><Clock3 className="h-3 w-3" />{new Date(project.createdAt).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</span></div>
+                  <h3 className="mt-8 truncate font-display text-xl font-semibold">{project.name}</h3><p className="mt-2 line-clamp-2 text-xs leading-6 studio-muted">{project.prompt}</p>
                 </div>
-
-                <div className="mt-6 pt-4 border-t border-white/[0.06] flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-medium text-emerald-400/90 font-mono uppercase">
-                      {proj.mode}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => handleDeleteProject(e, proj.id)}
-                      className="p-1 rounded text-zinc-600 hover:text-red-400 transition-colors"
-                      title="Delete project"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  </div>
-                  <Link
-                    href={`/studio/${proj.id}`}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.1] bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-800 hover:text-white transition-all"
-                  >
-                    <span>Open</span>
-                    <ArrowRight className="h-3 w-3" />
-                  </Link>
+                <div className="mt-7 flex items-center justify-between border-t studio-rule pt-4">
+                  <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider studio-muted"><span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-strong)]" />{project.mode}</div>
+                  <div className="flex items-center gap-3"><button type="button" onClick={(event) => deleteProject(event,project.id)} className="rounded p-1.5 studio-muted hover:text-red-600" aria-label={"Delete " + project.name}><Trash2 className="h-3.5 w-3.5" /></button><Link href={"/studio/" + project.id} className="text-xs font-semibold text-[var(--accent-strong)] hover:underline">Open project <ArrowRight className="ml-1 inline h-3 w-3" /></Link></div>
                 </div>
-              </div>
+              </article>
             ))}
+            {projects.length === 0 && <div className="flex min-h-[210px] flex-col justify-center rounded-xl border border-dashed studio-rule px-6 text-center"><FolderOpen className="mx-auto h-5 w-5 studio-muted" /><p className="mt-3 text-sm font-semibold">Your next project starts here</p><p className="mt-1 text-xs studio-muted">Created projects will appear in this library.</p></div>}
           </div>
         </section>
+        <footer className="mt-16 flex flex-col justify-between gap-2 border-t studio-rule pt-5 text-[10px] studio-muted sm:flex-row"><span>STUDIO / BUILD ENVIRONMENT</span><span>Plan clearly. Build deliberately. Keep ownership.</span></footer>
       </main>
-
-      {/* Footer */}
-      <footer className="border-t border-white/[0.06] bg-panel/40 py-8 px-6 text-center text-xs text-zinc-500">
-        <div className="mx-auto max-w-6xl flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-emerald-400" />
-            <span className="font-semibold text-zinc-300">Studio</span>
-            <span>— Prompt-First Autonomous App Builder</span>
-          </div>
-          <div className="flex items-center gap-4 text-[11px]">
-            <span>Next.js 14 App Router</span>
-            <span>•</span>
-            <span>Monaco & Sandpack</span>
-            <span>•</span>
-            <span>Gemini + Groq</span>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }
