@@ -83,3 +83,20 @@ button,a,input,textarea { -webkit-tap-highlight-color:transparent; }
 .studio-preview-shell .sp-layout { border:0!important; border-radius:0!important; background:transparent!important; }
 .studio-preview-shell .sp-preview-iframe { height:100%!important; width:100%!important; background:transparent!important; }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;}}
+
+/* Keep the legacy workspace chrome inside the same oxide-and-mineral design language. */
+.light .bg-emerald-500,.light .hover\\:bg-emerald-500:hover { background-color:#b95535!important; }
+.light .bg-emerald-400,.light .hover\\:bg-emerald-400:hover { background-color:#c96545!important; }
+.light .text-emerald-300,.light .text-emerald-200,.light .text-emerald-400 { color:#a84c30!important; }
+.light .border-emerald-500\\/30,.light .border-emerald-500\\/40,.light .border-emerald-500\\/20 { border-color:rgba(185,85,53,.28)!important; }
+.light .bg-emerald-500\\/10,.light .bg-emerald-500\\/15,.light .bg-emerald-500\\/20 { background-color:rgba(185,85,53,.09)!important; }
+.light .bg-gradient-to-r.from-emerald-500,.light .bg-gradient-to-br.from-emerald-500 { background-image:none!important; background-color:#b95535!important; }
+.light .shadow-emerald-500\\/20,.light .shadow-emerald-500\\/25,.light .shadow-emerald-500\\/30 { --tw-shadow-color:rgba(185,85,53,.10)!important; }
+.dark .bg-emerald-500 { background-color:#dc7958!important; }
+.dark .text-emerald-300,.dark .text-emerald-200 { color:#e58a6b!important; }
+.dark .border-emerald-500\\/30,.dark .border-emerald-500\\/40 { border-color:rgba(220,121,88,.32)!important; }
+.dark .bg-emerald-500\\/10,.dark .bg-emerald-500\\/15,.dark .bg-emerald-500\\/20 { background-color:rgba(220,121,88,.13)!important; }
+.light .bg-\\[\\#0b0f19\\]\\/95,.light .bg-\\[\\#0b0f19\\]\\/40 { background-color:#f4f2ec!important; }
+.light .bg-\\[\\#101726\\] { background-color:#fff!important; }
+.light .text-slate-100,.light .text-slate-200,.light .text-slate-300 { color:#252927!important; }
+.light .border-slate-700\\/80 { border-color:var(--line)!important; }
