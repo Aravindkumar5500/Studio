@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { z, ZodError } from "zod";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { requireProjectAccess } from "@/lib/firebase/auth-guard";
-import { COLLECTIONS, type ProjectVersionDoc } from "@/types/firestore";
+import { COLLECTIONS, type ProjectVersionDoc, type VersionSnapshotDoc } from "@/types/firestore";
+import { extractExportSignatures, extractImports } from "@/lib/vfs/analyze";
+import { sourceFileDocId } from "@/lib/hash";
 import { nowIso } from "@/lib/utils";
 
 export const runtime = "nodejs";
@@ -40,12 +42,64 @@ export async function POST(request: Request) {
       );
     }
 
+    const snapshotQuery = await db
+      .collection(COLLECTIONS.versionSnapshots)
+      .where("projectId", "==", body.projectId)
+      .where("versionId", "==", body.versionId)
+      .get();
+
+    const restoredFiles = snapshotQuery.docs.map((docSnap) => {
+      const s = docSnap.data() as VersionSnapshotDoc;
+      return {
+        filePath: s.filePath,
+        language: s.language,
+        content: s.content,
+        sha256: s.sha256,
+        byteSize: s.byteSize,
+      };
+    });
+
+    if (restoredFiles.length > 0) {
+      const existingSourceFiles = await db
+        .collection(COLLECTIONS.sourceFiles)
+        .where("projectId", "==", body.projectId)
+        .get();
+      const restoredIds = new Set(
+        restoredFiles.map((f) => sourceFileDocId(body.projectId, f.filePath)),
+      );
+      const ts = nowIso();
+      const batch = db.batch();
+      for (const docSnap of existingSourceFiles.docs) {
+        if (!restoredIds.has(docSnap.id)) {
+          batch.delete(docSnap.ref);
+        }
+      }
+      for (const f of restoredFiles) {
+        const id = sourceFileDocId(body.projectId, f.filePath);
+        batch.set(db.collection(COLLECTIONS.sourceFiles).doc(id), {
+          id,
+          projectId: body.projectId,
+          filePath: f.filePath,
+          language: f.language,
+          content: f.content,
+          sha256: f.sha256,
+          byteSize: f.byteSize,
+          exportSignatures: extractExportSignatures(f.content),
+          imports: extractImports(f.content),
+          lastModifiedBy: auth.user.uid,
+          createdAt: ts,
+          updatedAt: ts,
+        });
+      }
+      await batch.commit();
+    }
+
     await db.collection(COLLECTIONS.projects).doc(body.projectId).set(
       { currentVersionId: body.versionId, updatedAt: nowIso() },
       { merge: true },
     );
 
-    return NextResponse.json({ ok: true, version });
+    return NextResponse.json({ ok: true, version, files: restoredFiles });
   } catch (error: unknown) {
     if (error instanceof ZodError) {
       return NextResponse.json(

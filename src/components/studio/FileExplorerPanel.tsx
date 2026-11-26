@@ -31,10 +31,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 function getFileIcon(filePath: string) {
-  if (filePath.endsWith(".json")) return { icon: FileJson, color: "text-amber-400" };
-  if (filePath.endsWith(".css")) return { icon: FileType2, color: "text-violet-400" };
-  if (filePath.endsWith(".md")) return { icon: FileText, color: "text-emerald-400" };
-  return { icon: FileCode2, color: "text-sky-400" };
+  if (filePath.endsWith(".json")) return { icon: FileJson, color: "text-warning" };
+  if (filePath.endsWith(".css")) return { icon: FileType2, color: "text-primary" };
+  if (filePath.endsWith(".md")) return { icon: FileText, color: "text-success" };
+  return { icon: FileCode2, color: "text-primary" };
 }
 
 export function FileExplorerPanel({ hideHeader = false }: { hideHeader?: boolean }) {
@@ -83,44 +83,46 @@ export function FileExplorerPanel({ hideHeader = false }: { hideHeader?: boolean
   }
 
   return (
-    <div className="flex h-full flex-col select-none bg-panel/30">
+    <div className="flex h-full flex-col select-none bg-panel">
       {/* Subheader */}
       {!hideHeader && (
-        <div className="flex h-10 shrink-0 items-center justify-between border-b border-white/[0.06] px-3.5 bg-panel/50">
+        <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3.5 bg-surface/50">
           <div className="flex items-center gap-2">
-            <Folder className="h-3.5 w-3.5 text-emerald-400" />
-            <span className="text-[11px] font-semibold tracking-wider text-zinc-300 uppercase">
+            <Folder className="h-3.5 w-3.5 text-primary" />
+            <span className="text-[11px] font-semibold tracking-wider text-foreground uppercase">
               Workspace Files
             </span>
           </div>
           <button
             type="button"
             onClick={() => setCreating(true)}
-            className="flex items-center gap-1 rounded-md border border-white/[0.08] bg-zinc-900/60 px-2 py-1 text-[11px] text-zinc-300 transition-colors hover:border-emerald-500/40 hover:bg-zinc-800 hover:text-white"
+            className="flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-surface"
             title="Create new file"
           >
-            <Plus className="h-3 w-3 text-emerald-400" />
+            <Plus className="h-3 w-3 text-primary" />
             <span>New File</span>
           </button>
         </div>
       )}
 
       {/* Filter / Search Bar */}
-      <div className="border-b border-white/[0.06] p-2 bg-zinc-950/40">
+      <div className="border-b border-border p-2 bg-surface/30">
         <div className="relative flex items-center">
-          <Search className="absolute left-2.5 h-3.5 w-3.5 text-zinc-500 pointer-events-none" />
+          <Search className="absolute left-2.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Filter files..."
-            className="h-7 w-full rounded-lg border border-white/[0.08] bg-zinc-900/80 pl-8 pr-7 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-emerald-500/60 focus:outline-none"
+            aria-label="Filter workspace files"
+            className="h-7 w-full rounded-lg border border-input bg-card pl-8 pr-7 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
           />
           {query && (
             <button
               type="button"
               onClick={() => setQuery("")}
-              className="absolute right-2 text-zinc-500 hover:text-zinc-300"
+              aria-label="Clear file filter"
+              className="absolute right-2 text-muted-foreground hover:text-foreground"
             >
               <X className="h-3 w-3" />
             </button>
@@ -140,20 +142,20 @@ export function FileExplorerPanel({ hideHeader = false }: { hideHeader?: boolean
               <button
                 type="button"
                 onClick={() => setCollapsed((c) => ({ ...c, [group]: !c[group] }))}
-                className="group flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium text-zinc-400 transition-colors hover:bg-white/[0.04] hover:text-zinc-200"
+                className="group flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-surface hover:text-foreground"
               >
                 {isCollapsed ? (
-                  <ChevronRight className="h-3 w-3 text-zinc-500 transition-transform group-hover:text-zinc-300" />
+                  <ChevronRight className="h-3 w-3 text-muted-foreground" />
                 ) : (
-                  <ChevronDown className="h-3 w-3 text-zinc-500 transition-transform group-hover:text-zinc-300" />
+                  <ChevronDown className="h-3 w-3 text-muted-foreground" />
                 )}
                 {isCollapsed ? (
-                  <Folder className="h-3.5 w-3.5 text-zinc-500" />
+                  <Folder className="h-3.5 w-3.5 text-muted-foreground" />
                 ) : (
-                  <FolderOpen className="h-3.5 w-3.5 text-emerald-400" />
+                  <FolderOpen className="h-3.5 w-3.5 text-primary" />
                 )}
                 <span className="tracking-wide">{group}</span>
-                <span className="ml-auto rounded-full bg-zinc-900 px-1.5 py-0.2 font-mono text-[9px] text-zinc-500">
+                <span className="ml-auto rounded-full bg-surface border border-border px-1.5 py-0.2 font-mono text-[9px] text-muted-foreground">
                   {files.length}
                 </span>
               </button>
@@ -170,10 +172,10 @@ export function FileExplorerPanel({ hideHeader = false }: { hideHeader?: boolean
                       <div
                         key={path}
                         className={cn(
-                          "group relative flex items-center rounded-md px-2 py-1 text-xs transition-all",
+                          "group relative flex items-center rounded-md px-2 py-1 text-xs transition-colors",
                           active
-                            ? "bg-emerald-500/15 text-emerald-100 font-medium ring-1 ring-emerald-500/30"
-                            : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200",
+                            ? "bg-accent text-accent-foreground font-medium"
+                            : "text-muted-foreground hover:bg-surface hover:text-foreground",
                         )}
                       >
                         <button
@@ -182,16 +184,16 @@ export function FileExplorerPanel({ hideHeader = false }: { hideHeader?: boolean
                           className="flex min-w-0 flex-1 items-center gap-2 text-left"
                           title={path}
                         >
-                          <Icon className={cn("h-3.5 w-3.5 shrink-0", active ? "text-emerald-400" : color)} />
+                          <Icon className={cn("h-3.5 w-3.5 shrink-0", active ? "text-primary" : color)} />
                           <span className="truncate font-mono text-[11px]">{fileName}</span>
-                          <span className="ml-auto shrink-0 pr-1 text-[9px] text-zinc-500/80 group-hover:hidden">
+                          <span className="ml-auto shrink-0 pr-1 text-[9px] text-muted-foreground group-hover:hidden">
                             {formatBytes(file.byteSize)}
                           </span>
                         </button>
                         <button
                           type="button"
                           onClick={() => setPendingDelete(path)}
-                          className="hidden rounded p-0.5 text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-400 group-hover:block"
+                          className="hidden rounded p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive group-hover:block"
                           aria-label={`Delete ${path}`}
                         >
                           <Trash2 className="h-3 w-3" />
@@ -206,7 +208,7 @@ export function FileExplorerPanel({ hideHeader = false }: { hideHeader?: boolean
         })}
 
         {filteredPaths.length === 0 && (
-          <p className="px-3 py-6 text-center text-xs text-zinc-500">
+          <p className="px-3 py-6 text-center text-xs text-muted-foreground">
             No files matching &ldquo;{query}&rdquo;
           </p>
         )}
@@ -214,21 +216,16 @@ export function FileExplorerPanel({ hideHeader = false }: { hideHeader?: boolean
 
       {/* Delete Dialog */}
       <Dialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
-        <DialogContent className="max-w-md border-white/[0.1] bg-zinc-950/95 backdrop-blur-xl">
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-white">Delete file?</DialogTitle>
-            <DialogDescription className="text-zinc-400 text-xs">
-              <span className="font-mono text-emerald-300 font-medium">{pendingDelete}</span> will be
+            <DialogTitle>Delete file?</DialogTitle>
+            <DialogDescription className="text-xs">
+              <span className="font-mono text-primary font-medium">{pendingDelete}</span> will be
               removed from the project workspace. You can restore it anytime from an earlier checkpoint.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPendingDelete(null)}
-              className="border-white/[0.1] bg-zinc-900"
-            >
+            <Button variant="outline" size="sm" onClick={() => setPendingDelete(null)}>
               Cancel
             </Button>
             <Button
@@ -247,42 +244,31 @@ export function FileExplorerPanel({ hideHeader = false }: { hideHeader?: boolean
 
       {/* Create Dialog */}
       <Dialog open={creating} onOpenChange={setCreating}>
-        <DialogContent className="max-w-md border-white/[0.1] bg-zinc-950/95 backdrop-blur-xl">
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-white">Create new source file</DialogTitle>
-            <DialogDescription className="text-zinc-400 text-xs">
+            <DialogTitle>Create new source file</DialogTitle>
+            <DialogDescription className="text-xs">
               Adds a component or page to the project virtual file system.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-1">
-            <Label htmlFor="new-file-path" className="text-xs text-zinc-300">
-              File path
-            </Label>
+            <Label htmlFor="new-file-path">File path</Label>
             <Input
               id="new-file-path"
               value={newPath}
               autoFocus
               onChange={(event) => setNewPath(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && handleCreate()}
-              className="font-mono text-xs border-white/[0.1] bg-zinc-900/90 text-white"
+              className="font-mono text-xs"
               placeholder="src/components/Pricing.tsx"
             />
-            {createError && <p className="text-xs text-red-400">{createError}</p>}
+            {createError && <p className="text-xs text-destructive">{createError}</p>}
           </div>
           <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCreating(false)}
-              className="border-white/[0.1] bg-zinc-900"
-            >
+            <Button variant="outline" size="sm" onClick={() => setCreating(false)}>
               Cancel
             </Button>
-            <Button
-              size="sm"
-              onClick={handleCreate}
-              className="bg-emerald-500 text-zinc-950 font-bold hover:bg-emerald-400"
-            >
+            <Button size="sm" onClick={handleCreate}>
               Create file
             </Button>
           </DialogFooter>

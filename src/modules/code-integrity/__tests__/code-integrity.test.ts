@@ -1,4 +1,8 @@
-import { repairSourceCode, validateSourceCode } from "../application/code-integrity-service";
+import {
+  repairSourceCode,
+  validateProjectVfs,
+  validateSourceCode,
+} from "../application/code-integrity-service";
 
 function assert(condition: boolean, msg: string) {
   if (!condition) {
@@ -142,5 +146,72 @@ export function Nav() {
   );
 }
 
-console.log("\n🎉 All 6 Code Integrity Engine Test Suites Passed Successfully!");
+// Test 7: Import path normalization (src/... and bare components/... -> @/...)
+{
+  const rawImports = `import React from "react";
+import { Hero } from "src/components/Hero.tsx";
+import { Footer } from 'components/Footer.jsx';
+
+export default function HomePage() {
+  return (
+    <main>
+      <Hero />
+      <Footer />
+    </main>
+  );
+}`;
+  const repaired = repairSourceCode("src/app/page.tsx", rawImports);
+  assert(
+    repaired.content.includes('from "@/components/Hero"'),
+    "Normalized src/components/Hero.tsx to @/components/Hero",
+  );
+  assert(
+    repaired.content.includes("from '@/components/Footer'"),
+    "Normalized components/Footer.jsx to @/components/Footer",
+  );
+}
+
+// Test 8: Cross-file VFS unresolved import check
+{
+  const vfs = {
+    "src/app/page.tsx": `import React from "react";
+import { MissingWidget } from "@/components/MissingWidget";
+export default function Page() { return <MissingWidget />; }`,
+  };
+  const projectValidation = validateProjectVfs(vfs);
+  assert(!projectValidation.valid, "Detects unresolved local import in VFS");
+  assert(
+    projectValidation.diagnostics.some((d) => d.code === "UNRESOLVED_LOCAL_IMPORT"),
+    "Emits UNRESOLVED_LOCAL_IMPORT diagnostic",
+  );
+}
+
+// Test 9: Duplicate declaration "Link" between next/link and lucide-react
+{
+  const duplicateLinkCode = `"use client";
+import Link from "next/link";
+import { useState } from "react";
+import { Link, Menu } from "lucide-react";
+
+export function Navbar() {
+  const [open, setOpen] = useState(false);
+  return (
+    <nav>
+      <Link href="/">Home</Link>
+      <button onClick={() => setOpen(!open)}><Menu /></button>
+    </nav>
+  );
+}`;
+  const repaired = repairSourceCode("src/components/Navbar.tsx", duplicateLinkCode);
+  assert(repaired.repaired, "Repairs duplicate Link declaration");
+  assert(
+    repaired.content.includes('import Link from "next/link";') &&
+      repaired.content.includes('import { Menu } from "lucide-react";') &&
+      !repaired.content.includes("Link, Menu"),
+    "Keeps next/link Link and removes colliding Link from lucide-react",
+  );
+  assert(repaired.valid, "Repaired Navbar passes validation");
+}
+
+console.log("\n🎉 All 9 Code Integrity Engine Test Suites Passed Successfully!");
 

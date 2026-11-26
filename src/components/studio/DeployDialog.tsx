@@ -112,7 +112,7 @@ export function DeployDialog({
                 id="vercel-target"
                 value={target}
                 onChange={(event) => setTarget(event.target.value as "production" | "preview")}
-                className="h-9 w-full rounded-md border border-slate-800 bg-slate-950 px-2 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="h-9 w-full rounded-lg border border-input bg-card px-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 <option value="production">Production</option>
                 <option value="preview">Preview</option>
@@ -135,14 +135,14 @@ export function DeployDialog({
             href={deployUrl}
             target="_blank"
             rel="noreferrer"
-            className="mt-4 flex items-center gap-2 rounded-md border border-emerald-800/60 bg-emerald-500/10 p-2.5 text-xs text-emerald-300 hover:bg-emerald-500/15"
+            className="mt-4 flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 p-2.5 text-xs text-success hover:bg-success/15"
           >
             <ExternalLink className="h-3.5 w-3.5" />
             {deployUrl}
           </a>
         )}
         {error && (
-          <p className="mt-4 rounded-md border border-red-800/60 bg-red-500/10 p-2.5 text-xs text-red-300">
+          <p className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive">
             {error}
           </p>
         )}

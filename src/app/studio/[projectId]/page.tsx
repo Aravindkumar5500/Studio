@@ -5,10 +5,12 @@ const StudioWorkspace = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex h-screen w-full items-center justify-center bg-[#09090b] text-white">
+      <div className="flex h-screen w-full items-center justify-center bg-canvas text-foreground">
         <div className="flex flex-col items-center gap-4">
-          <div className="h-10 w-10 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
-          <span className="font-mono text-sm text-zinc-400">Initializing Studio Workspace...</span>
+          <div className="h-9 w-9 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <span className="font-mono text-xs text-muted-foreground">
+            Initializing Studio Workspace...
+          </span>
         </div>
       </div>
     ),

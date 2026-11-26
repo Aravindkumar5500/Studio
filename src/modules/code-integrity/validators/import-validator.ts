@@ -1,109 +1,43 @@
+import * as React from "react";
 import ts from "typescript";
 import type { CodeDiagnostic } from "../domain/types";
 
-export const REACT_HOOKS = new Set([
-  "useState",
-  "useEffect",
-  "useMemo",
-  "useCallback",
-  "useRef",
-  "useContext",
-  "useReducer",
-  "useId",
-  "useTransition",
-  "useDeferredValue",
-  "useLayoutEffect",
-  "useImperativeHandle",
-  "useDebugValue",
-]);
+/** Dynamically inspect installed React exports for hooks (`use*`). */
+function getReactHooks(): Set<string> {
+  const hooks = new Set<string>();
+  for (const key of Object.keys(React)) {
+    if (/^use[A-Z]/.test(key)) hooks.add(key);
+  }
+  return hooks;
+}
 
-export const REACT_TYPES = new Set([
-  "ReactNode",
-  "ReactElement",
-  "FC",
-  "ComponentProps",
-  "CSSProperties",
-  "HTMLAttributes",
-  "ButtonHTMLAttributes",
-  "InputHTMLAttributes",
-  "FormEvent",
-  "ChangeEvent",
-  "MouseEvent",
-]);
+export const REACT_HOOKS: Set<string> = getReactHooks();
 
-export const COMMON_LUCIDE_ICONS = new Set([
-  "Search",
-  "ArrowRight",
-  "ArrowLeft",
-  "ArrowUp",
-  "ArrowDown",
-  "Sparkles",
-  "Check",
-  "CheckCircle",
-  "CheckCircle2",
-  "X",
-  "XCircle",
-  "ChevronDown",
-  "ChevronUp",
-  "ChevronLeft",
-  "ChevronRight",
-  "Calendar",
-  "Clock",
-  "User",
-  "Users",
-  "Mail",
-  "Phone",
-  "Building",
-  "MapPin",
-  "Plus",
-  "Minus",
-  "Trash",
-  "Trash2",
-  "Filter",
-  "Sliders",
-  "SlidersHorizontal",
-  "Star",
-  "Heart",
-  "Share2",
-  "ExternalLink",
-  "Eye",
-  "EyeOff",
-  "Lock",
-  "Unlock",
-  "Bell",
-  "Menu",
-  "MoreHorizontal",
-  "MoreVertical",
-  "RefreshCw",
-  "Download",
-  "Upload",
-  "Copy",
-  "Edit",
-  "Edit2",
-  "Edit3",
-  "Layers",
-  "LayoutDashboard",
-  "Settings",
-  "DollarSign",
-  "TrendingUp",
-  "TrendingDown",
-  "BarChart",
-  "BarChart2",
-  "BarChart3",
-  "PieChart",
-  "ShoppingBag",
-  "ShoppingCart",
-  "Package",
-  "Tag",
-  "Globe",
-  "Zap",
-  "Shield",
-  "ShieldCheck",
-  "AlertCircle",
-  "AlertTriangle",
-  "Info",
-  "HelpCircle",
-]);
+let cachedLucideIcons: Set<string> | null = null;
+
+/**
+ * Dynamically reads all PascalCase icon exports from the installed `lucide-react`
+ * package when running on Node.js, avoiding hardcoded icon allowlists.
+ */
+function getLucideExports(): Set<string> {
+  if (cachedLucideIcons) return cachedLucideIcons;
+  const icons = new Set<string>();
+  if (typeof process !== "undefined" && Boolean(process.versions?.node)) {
+    try {
+      const nodeRequire = eval("require") as NodeRequire;
+      const lucide = nodeRequire("lucide-react") as Record<string, unknown>;
+      for (const key of Object.keys(lucide)) {
+        if (/^[A-Z][A-Za-z0-9]+$/.test(key) && key !== "Icon" && !key.endsWith("Icon")) {
+          icons.add(key);
+        }
+      }
+    } catch {
+      // Non-fatal if lucide-react cannot be resolved in current runtime
+    }
+  }
+  cachedLucideIcons = icons;
+  return icons;
+}
 
 export interface ImportValidationOutcome {
   diagnostics: CodeDiagnostic[];
@@ -112,6 +46,152 @@ export interface ImportValidationOutcome {
   missingNextLink: boolean;
   missingNextImage: boolean;
   repairedSource: string;
+}
+
+/**
+ * Deduplicates conflicting import bindings across declarations (e.g. `import Link from "next/link"`
+ * colliding with `import { Link, Menu } from "lucide-react"`) and fixes `<Link href="...">`
+ * accidentally imported from `lucide-react` instead of `next/link`.
+ */
+function deduplicateAndResolveImportConflicts(source: string, filePath: string): string {
+  const sf = ts.createSourceFile(
+    filePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+
+  // Detect whether JSX uses <Link href=...> (navigation link rather than Lucide Link icon)
+  let hasJsxLinkWithHref = false;
+  function checkJsxLink(node: ts.Node) {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      if (node.tagName.getText(sf) === "Link") {
+        const hasHref = node.attributes.properties.some(
+          (attr) => ts.isJsxAttribute(attr) && attr.name.getText(sf) === "href",
+        );
+        if (hasHref) hasJsxLinkWithHref = true;
+      }
+    }
+    ts.forEachChild(node, checkJsxLink);
+  }
+  checkJsxLink(sf);
+
+  const importDecls = sf.statements.filter(ts.isImportDeclaration);
+  if (importDecls.length === 0) return source;
+
+  const hasNextLinkImport = importDecls.some(
+    (d) => d.moduleSpecifier.getText(sf).replace(/['"]/g, "") === "next/link",
+  );
+
+  // Track seen local binding names; prefer next/link for `Link` if both next/link and lucide-react exist
+  const seenBindings = new Set<string>();
+  if (hasNextLinkImport || hasJsxLinkWithHref) {
+    seenBindings.add("Link");
+  }
+
+  const edits: { start: number; end: number; replacement: string }[] = [];
+  let needInjectNextLink = false;
+
+  for (const decl of importDecls) {
+    const clause = decl.importClause;
+    if (!clause || clause.isTypeOnly) continue;
+
+    const moduleSpec = decl.moduleSpecifier.getText(sf).replace(/['"]/g, "");
+    const isNextLink = moduleSpec === "next/link";
+    const isLucide = moduleSpec === "lucide-react";
+
+    let changed = false;
+    let defaultName = clause.name?.text ?? null;
+
+    if (defaultName) {
+      if (isNextLink) {
+        // Reserve Link for next/link
+        seenBindings.add(defaultName);
+      } else if (seenBindings.has(defaultName)) {
+        defaultName = null;
+        changed = true;
+      } else {
+        seenBindings.add(defaultName);
+      }
+    }
+
+    let keptNamed: string[] | null = null;
+    let namespaceName: string | null = null;
+
+    if (clause.namedBindings) {
+      if (ts.isNamedImports(clause.namedBindings)) {
+        keptNamed = [];
+        for (const el of clause.namedBindings.elements) {
+          const localName = el.name.text;
+          if (localName === "Link" && isLucide && (hasNextLinkImport || hasJsxLinkWithHref)) {
+            changed = true;
+            if (!hasNextLinkImport && hasJsxLinkWithHref) {
+              needInjectNextLink = true;
+            }
+            continue;
+          }
+          if (seenBindings.has(localName)) {
+            changed = true;
+            continue;
+          }
+          seenBindings.add(localName);
+          keptNamed.push(el.getText(sf));
+        }
+      } else if (ts.isNamespaceImport(clause.namedBindings)) {
+        const ns = clause.namedBindings.name.text;
+        if (seenBindings.has(ns)) {
+          changed = true;
+        } else {
+          seenBindings.add(ns);
+          namespaceName = ns;
+        }
+      }
+    }
+
+    if (!changed) continue;
+
+    const parts: string[] = [];
+    if (defaultName) parts.push(defaultName);
+    if (namespaceName) parts.push(`* as ${namespaceName}`);
+    if (keptNamed && keptNamed.length > 0) parts.push(`{ ${keptNamed.join(", ")} }`);
+
+    const start = decl.getStart(sf);
+    let end = decl.getEnd();
+    if (parts.length === 0) {
+      // Remove entire empty import line including trailing newline
+      while (end < source.length && (source[end] === "\r" || source[end] === "\n")) {
+        end++;
+        if (source[end - 1] === "\n") break;
+      }
+      edits.push({ start, end, replacement: "" });
+    } else {
+      edits.push({
+        start,
+        end,
+        replacement: `import ${parts.join(", ")} from ${decl.moduleSpecifier.getText(sf)};`,
+      });
+    }
+  }
+
+  let next = source;
+  if (edits.length > 0) {
+    // Apply from end to start so offsets stay valid
+    for (const edit of [...edits].sort((a, b) => b.start - a.start)) {
+      next = next.slice(0, edit.start) + edit.replacement + next.slice(edit.end);
+    }
+  }
+
+  if (needInjectNextLink) {
+    const linkImport = `import Link from "next/link";\n`;
+    if (/^\s*["']use client["'];?\s*\n/m.test(next)) {
+      next = next.replace(/^\s*["']use client["'];?\s*\n/m, (m) => `${m}${linkImport}`);
+    } else {
+      next = `${linkImport}${next}`;
+    }
+  }
+
+  return next;
 }
 
 /**
@@ -131,9 +211,11 @@ export function validateAndRepairImports(filePath: string, source: string): Impo
     };
   }
 
+  const normalizedInput = deduplicateAndResolveImportConflicts(source, filePath);
+
   const sourceFile = ts.createSourceFile(
     filePath,
-    source,
+    normalizedInput,
     ts.ScriptTarget.Latest,
     true,
     ts.ScriptKind.TSX,
@@ -254,10 +336,11 @@ export function validateAndRepairImports(filePath: string, source: string): Impo
     }
   }
 
+  const lucideIcons = getLucideExports();
   const missingLucideIcons: string[] = [];
   for (const [tag, node] of referencedJsxTags) {
     if (
-      COMMON_LUCIDE_ICONS.has(tag) &&
+      lucideIcons.has(tag) &&
       !importedSymbols.has(tag) &&
       !declaredSymbols.has(tag)
     ) {
@@ -324,7 +407,7 @@ export function validateAndRepairImports(filePath: string, source: string): Impo
   }
 
   // 5. Automatic Source Repair
-  let repairedSource = source;
+  let repairedSource = normalizedInput;
 
   // A. Repair React Hooks
   if (missingReactHooks.length > 0) {
@@ -406,11 +489,11 @@ export function validateAndRepairImports(filePath: string, source: string): Impo
   // D. Normalize local import paths and strip redundant file extensions
   repairedSource = repairedSource
     // Map "src/..." to "@/..."
-    .replace(/(from\s+["'])src\/([^"']+)\1/g, "$1@/$2")
+    .replace(/(from\s+)(["'])src\/([^"']+)\2/g, "$1$2@/$3$2")
     // Map bare "components/...", "data/...", "lib/...", "theme/..." to "@/..."
-    .replace(/(from\s+["'])(components|data|lib|theme)\/([^"']+)\1/g, "$1@/$2/$3")
+    .replace(/(from\s+)(["'])(components|data|lib|theme)\/([^"']+)\2/g, "$1$2@/$3/$4$2")
     // Strip trailing .tsx/.jsx/.ts/.js from local/alias imports
-    .replace(/(from\s+["'](?:@\/|\.\.?\/)[^"']+?)\.(tsx|jsx|ts|js)(["'])/g, "$1$3");
+    .replace(/(from\s+)(["'])((?:@\/|\.\.?\/)[^"']+?)\.(tsx|jsx|ts|js)\2/g, "$1$2$3$2");
 
   return {
     diagnostics,

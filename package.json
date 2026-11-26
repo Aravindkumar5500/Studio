@@ -47,6 +47,7 @@
     "zod-to-json-schema": "^3.24.1"
   },
   "devDependencies": {
+    "@astryxdesign/cli": "^0.7.17",
     "@types/node": "^20.17.10",
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",

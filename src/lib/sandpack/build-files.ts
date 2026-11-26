@@ -1,6 +1,8 @@
 import { INSPECTOR_RUNTIME } from "./runtime";
 import { stampStudioIds } from "@/lib/patch/studio-id";
 import { repairSourceCode } from "@/modules/code-integrity";
+import { isLightHexColor } from "@/lib/utils";
+import { extractDependenciesFromFiles } from "@/config/studio-config";
 
 /**
  * Converts the Next.js App Router VFS into a bundle the Sandpack react-ts
@@ -10,6 +12,7 @@ import { repairSourceCode } from "@/modules/code-integrity";
 export function buildSandpackFiles(
   files: Record<string, string>,
   theme?: SandpackTheme,
+  configuredDeps?: Record<string, string>,
 ): Record<string, { code: string; hidden?: boolean; active?: boolean }> {
   const out: Record<string, { code: string; hidden?: boolean }> = {};
 
@@ -57,6 +60,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./studio-theme";
 import "./studio-inspector";
+import "./studio-api-bridge";
 
 // The App Router <body> never mounts in the sandbox, so its classes are
 // applied to the preview document directly.
@@ -75,14 +79,11 @@ if (container) {
 
   out["/studio-theme.ts"] = { hidden: true, code: buildThemeModule(theme) };
   out["/studio-inspector.ts"] = { hidden: true, code: INSPECTOR_RUNTIME };
+  out["/studio-api-bridge.ts"] = { hidden: true, code: buildApiBridgeModule(files) };
 
   const bgColor = theme?.colors?.background || "#09090b";
-  const isLight =
-    bgColor === "#ffffff" ||
-    bgColor === "#faf8f5" ||
-    bgColor === "#f1f5f9" ||
-    bgColor === "#f8fafc";
-  const textColor = isLight ? "#0f172a" : "#fafafa";
+  const isLight = isLightHexColor(bgColor);
+  const textColor = theme?.colors?.foreground || (isLight ? "#0f172a" : "#fafafa");
 
   const tailwindColors = {
     canvas: bgColor,
@@ -147,22 +148,15 @@ if (container) {
 `,
   };
 
+  const dependencies = extractDependenciesFromFiles(files, configuredDeps);
+
   out["/package.json"] = {
     hidden: true,
     code: JSON.stringify(
       {
         name: "studio-preview",
         main: "/index.tsx",
-        dependencies: {
-          react: "^18.3.1",
-          "react-dom": "^18.3.1",
-          "lucide-react": "^0.469.0",
-          "@tabler/icons-react": "^3.28.1",
-          "@phosphor-icons/react": "^2.1.7",
-          "framer-motion": "^11.15.0",
-          clsx: "^2.1.1",
-          "tailwind-merge": "^2.6.0",
-        },
+        dependencies,
       },
       null,
       2,
@@ -191,11 +185,7 @@ export function buildThemeModule(theme?: SandpackTheme): string {
   const surface = theme?.colors?.surface || "#18181b";
   const background = theme?.colors?.background || "#09090b";
   const border = theme?.colors?.border || "#27272a";
-  const isLight =
-    background === "#ffffff" ||
-    background === "#faf8f5" ||
-    background === "#f1f5f9" ||
-    background === "#f8fafc";
+  const isLight = isLightHexColor(background);
   const foreground = theme?.colors?.foreground || (isLight ? "#0f172a" : "#fafafa");
 
   const config = {
@@ -267,7 +257,7 @@ export function rewriteAliases(content: string, filePath?: string): string {
     // Map "./src/..." to "/src/..."
     .replace(/(["'])\.\/src\/([^"']+)\1/g, '"/src/$2"')
     // Map bare root-level aliases "components/...", "data/...", "lib/...", "theme/..." to "/src/..."
-    .replace(/(["'])(components|data|lib|theme)\/([^"']+)\1/g, '"/src/$1/$2"')
+    .replace(/(["'])(components|data|lib|theme)\/([^"']+)\1/g, '"/src/$2/$3"')
     // If inside src/app/page.tsx, map "./components/..." to "/src/components/..."
     .replace(/(["'])\.\/components\/([^"']+)\1/g, '"/src/components/$2"')
     // Strip trailing .tsx / .jsx / .ts / .js from ANY local import (/src/..., ./..., ../...)
@@ -327,3 +317,45 @@ export default function Image({
 }
 `,
 };
+
+/**
+ * Generates an in-sandbox fetch interceptor for `/api/...` routes so full-stack
+ * UI previews calling Next.js route handlers remain interactive inside Sandpack.
+ */
+function buildApiBridgeModule(files: Record<string, string>): string {
+  const apiRoutes = Object.keys(files)
+    .filter((p) => /^src\/app\/api\/.+\/route\.[jt]sx?$/.test(p))
+    .map((p) => "/" + p.replace(/^src\/app\//, "").replace(/\/route\.[jt]sx?$/, ""));
+
+  return `// Sandpack client-side API route bridge for previewing full-stack Next.js routes.
+const REGISTERED_ROUTES: string[] = ${JSON.stringify(apiRoutes)};
+
+if (typeof window !== "undefined" && typeof window.fetch === "function" && !(window as unknown as { __studioFetchPatched?: boolean }).__studioFetchPatched) {
+  (window as unknown as { __studioFetchPatched?: boolean }).__studioFetchPatched = true;
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async function patchedStudioFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.pathname : input.url;
+    if (typeof url === "string" && url.startsWith("/api/")) {
+      const cleanPath = url.split("?")[0];
+      const known = REGISTERED_ROUTES.some((r) => cleanPath === r || cleanPath.startsWith(r + "/"));
+      const method = (init?.method || "GET").toUpperCase();
+      let parsedBody: unknown = null;
+      if (typeof init?.body === "string") {
+        try { parsedBody = JSON.parse(init.body); } catch { parsedBody = init.body; }
+      }
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          data: parsedBody ?? [],
+          meta: { simulatedInSandpack: true, route: cleanPath, method, matchedRouteFile: known },
+        }),
+        { status: method === "POST" ? 201 : 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return nativeFetch(input, init);
+  };
+}
+
+export {};
+`;
+}

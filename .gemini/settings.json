@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "shadcnspace": {
+      "url": "https://mcp.shadcnspace.com/mcp",
+      "type": "http"
+    }
+  }
+}

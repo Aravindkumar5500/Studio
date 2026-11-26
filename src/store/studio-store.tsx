@@ -1,14 +1,15 @@
 "use client";
 
 import * as React from "react";
-import type {
-  ApprovalDoc,
-  ConversationMessageDoc,
-  GenerationTaskDoc,
-  ProjectVersionDoc,
-  ViewMode,
-  ViewportPreset,
-  WorkflowMode,
+import {
+  COLLECTIONS,
+  type ApprovalDoc,
+  type ConversationMessageDoc,
+  type GenerationTaskDoc,
+  type ProjectVersionDoc,
+  type ViewMode,
+  type ViewportPreset,
+  type WorkflowMode,
 } from "@/types/firestore";
 import type { DesignSystem, Prd } from "@/lib/ai/schemas";
 import type { VfsFile, VfsMap } from "@/lib/vfs/types";
@@ -22,6 +23,7 @@ import { authenticatedFetch } from "@/lib/firebase/auth-client";
 import { deleteFile as deleteFileDoc, loadProjectFiles, persistFile, persistFiles } from "@/lib/vfs/store";
 import type { PreviewStatus, RuntimeDiagnostic } from "@/modules/code-integrity";
 import { repairSourceCode } from "@/modules/code-integrity";
+import type { StudioConfig } from "@/config/studio-config";
 
 export interface StudioState {
   projectId: string;
@@ -46,6 +48,7 @@ export interface StudioState {
   persistence: "firestore" | "memory";
   previewStatus: PreviewStatus;
   activeDiagnostics: RuntimeDiagnostic[];
+  studioConfig: StudioConfig | null;
 }
 
 type Action =
@@ -63,9 +66,11 @@ type Action =
   | { type: "setTasks"; tasks: GenerationTaskDoc[] }
   | { type: "updateTask"; taskId: string; patch: Partial<GenerationTaskDoc> }
   | { type: "setApprovals"; approvals: ApprovalDoc[] }
-  | { type: "decideApproval"; approvalId: string; status: "approved" | "rejected" }
+  | { type: "decideApproval"; approvalId: string; status: "approved" | "rejected"; decidedBy?: string }
   | { type: "addVersion"; version: ProjectVersionDoc }
+  | { type: "setVersions"; versions: ProjectVersionDoc[] }
   | { type: "setRequirements"; requirements: Prd | null }
+  | { type: "setStudioConfig"; studioConfig: StudioConfig }
   | { type: "setDesignSystem"; designSystem: DesignSystem }
   | { type: "setCanvasBg"; canvasBg: StudioState["canvasBg"] }
   | { type: "setSaveState"; saveState: StudioState["saveState"] }
@@ -139,12 +144,14 @@ function reducer(state: StudioState, action: Action): StudioState {
         ...state,
         approvals: state.approvals.map((a) =>
           a.id === action.approvalId
-            ? { ...a, status: action.status, decidedAt: nowIso(), decidedBy: "me" }
+            ? { ...a, status: action.status, decidedAt: nowIso(), decidedBy: action.decidedBy ?? "workspace" }
             : a,
         ),
       };
     case "addVersion":
       return { ...state, versions: [action.version, ...state.versions] };
+    case "setVersions":
+      return { ...state, versions: action.versions };
     case "setRequirements":
       return { ...state, requirements: action.requirements };
     case "setDesignSystem":
@@ -161,13 +168,24 @@ function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, projectName: action.name };
     case "setPreviewStatus":
       return { ...state, previewStatus: action.status };
-    case "addDiagnostic":
+    case "addDiagnostic": {
+      const incoming = action.diagnostic;
+      const incomingPath = (incoming.filePath || "").replace(/^\//, "");
+      const incomingLine = incoming.line ?? 0;
+      const isSame = (d: RuntimeDiagnostic) =>
+        d.id === incoming.id ||
+        ((d.filePath || "").replace(/^\//, "") === incomingPath &&
+          (d.line ?? 0) === incomingLine &&
+          d.message === incoming.message);
       return {
         ...state,
-        activeDiagnostics: [action.diagnostic, ...state.activeDiagnostics.filter((d) => d.id !== action.diagnostic.id)].slice(0, 5),
+        activeDiagnostics: [incoming, ...state.activeDiagnostics.filter((d) => !isSame(d))].slice(0, 5),
       };
+    }
     case "clearDiagnostics":
       return { ...state, activeDiagnostics: [] };
+    case "setStudioConfig":
+      return { ...state, studioConfig: action.studioConfig };
     default:
       return state;
   }
@@ -175,14 +193,15 @@ function reducer(state: StudioState, action: Action): StudioState {
 
 function initialState(projectId: string): StudioState {
   const isDemo = projectId === "demo";
-  const seed = isDemo ? buildSeedProject() : buildMinimalProject("New Application");
+  const initialName = isDemo ? "Nimbus Demo" : projectId;
+  const seed = isDemo ? buildSeedProject() : buildMinimalProject(initialName);
   const files: VfsMap = {};
   for (const [path, content] of Object.entries(seed)) {
     files[path] = { ...makeVfsFile(path, content), dirty: false };
   }
   return {
     projectId,
-    projectName: isDemo ? "Nimbus Landing" : "New Application",
+    projectName: initialName,
     workflowMode: "guided",
     viewMode: "preview",
     viewport: "desktop",
@@ -218,7 +237,7 @@ function initialState(projectId: string): StudioState {
           sha256: f.sha256,
           byteSize: f.byteSize,
         })),
-        createdBy: "system",
+        createdBy: "initial",
         createdAt: nowIso(),
       },
     ],
@@ -230,6 +249,7 @@ function initialState(projectId: string): StudioState {
     persistence: "memory",
     previewStatus: "ready",
     activeDiagnostics: [],
+    studioConfig: null,
   };
 }
 
@@ -249,10 +269,11 @@ export interface StudioApi extends StudioState {
       | { kind: "removeClass"; value: string },
   ) => Promise<void>;
   sendChatMessage: (message: string) => Promise<void>;
-  planBuild: (idea: string, modeOverride?: WorkflowMode) => Promise<void>;
+  planBuild: (idea: string, modeOverride?: WorkflowMode, includeBackend?: boolean) => Promise<void>;
   runPendingTasks: () => Promise<void>;
+  generateDatabaseLayer: () => Promise<boolean>;
   createCheckpoint: (label?: string) => ProjectVersionDoc;
-  restoreVersion: (versionId: string) => void;
+  restoreVersion: (versionId: string) => Promise<void> | void;
   fileMap: Record<string, string>;
   latestVersionLabel: string;
 }
@@ -274,6 +295,22 @@ export function StudioProvider({
   const snapshots = React.useRef<Map<string, Record<string, string>>>(
     new Map([["v1.0", mapContents(state.files)]]),
   );
+
+  // Load dynamic studio configuration from backend API (Firestore + config + package.json)
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch("/api/studio/config")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((payload: { ok?: boolean; config?: StudioConfig } | null) => {
+        if (!cancelled && payload?.ok && payload.config) {
+          dispatch({ type: "setStudioConfig", studioConfig: payload.config });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Attempt anonymous sign-in if configured so guest sessions can obtain an auth token
   React.useEffect(() => {
@@ -312,6 +349,43 @@ export function StudioProvider({
         } else {
           await persistFiles(db, projectId, Object.values(stateRef.current.files), uid);
           dispatch({ type: "hydrate", files: stateRef.current.files, persistence: "firestore" });
+        }
+
+        // Also hydrate requirements, designSystem, tasks, approvals, and versions from Firestore
+        const { collection, doc, getDoc, getDocs, query, where } = await import("firebase/firestore");
+        const [reqSnap, dsSnap, tasksSnap, approvalsSnap, versionsSnap] = await Promise.allSettled([
+          getDoc(doc(db, COLLECTIONS.requirements, projectId)),
+          getDoc(doc(db, COLLECTIONS.designSystems, projectId)),
+          getDocs(query(collection(db, COLLECTIONS.generationTasks), where("projectId", "==", projectId))),
+          getDocs(query(collection(db, COLLECTIONS.approvals), where("projectId", "==", projectId))),
+          getDocs(query(collection(db, COLLECTIONS.projectVersions), where("projectId", "==", projectId))),
+        ]);
+        if (cancelled) return;
+        if (reqSnap.status === "fulfilled" && reqSnap.value.exists()) {
+          const reqData = reqSnap.value.data() as Prd;
+          dispatch({ type: "setRequirements", requirements: reqData });
+          if (reqData.productName) dispatch({ type: "setProjectName", name: reqData.productName });
+        }
+        if (dsSnap.status === "fulfilled" && dsSnap.value.exists()) {
+          dispatch({ type: "setDesignSystem", designSystem: dsSnap.value.data() as DesignSystem });
+        }
+        if (tasksSnap.status === "fulfilled" && !tasksSnap.value.empty) {
+          const loadedTasks = tasksSnap.value.docs
+            .map((d) => d.data() as GenerationTaskDoc)
+            .sort((a, b) => a.order - b.order);
+          dispatch({ type: "setTasks", tasks: loadedTasks });
+        }
+        if (approvalsSnap.status === "fulfilled" && !approvalsSnap.value.empty) {
+          dispatch({
+            type: "setApprovals",
+            approvals: approvalsSnap.value.docs.map((d) => d.data() as ApprovalDoc),
+          });
+        }
+        if (versionsSnap.status === "fulfilled" && !versionsSnap.value.empty) {
+          const loadedVersions = versionsSnap.value.docs
+            .map((d) => d.data() as ProjectVersionDoc)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+          dispatch({ type: "setVersions", versions: loadedVersions });
         }
       } catch (error) {
         console.warn("Firestore sync skipped (maintaining in-memory VFS):", error);
@@ -375,6 +449,8 @@ export function StudioProvider({
     (label?: string): ProjectVersionDoc => {
       const current = stateRef.current;
       const major = current.versions.length;
+      const auth = getFirebaseAuth();
+      const uid = auth?.currentUser?.uid ?? "local";
       const version: ProjectVersionDoc = {
         id: shortId("ver"),
         projectId,
@@ -385,7 +461,7 @@ export function StudioProvider({
           sha256: f.sha256,
           byteSize: f.byteSize,
         })),
-        createdBy: "me",
+        createdBy: uid,
         createdAt: nowIso(),
       };
       snapshots.current.set(version.id, mapContents(current.files));
@@ -397,9 +473,14 @@ export function StudioProvider({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             projectId,
+            versionId: version.id,
             label: version.label,
             parentVersionId: version.parentVersionId,
             manifest: version.manifest,
+            files: Object.values(current.files).map((f) => ({
+              filePath: f.filePath,
+              content: f.content,
+            })),
           }),
         }).catch((err) => console.warn("Failed to persist version checkpoint:", err));
       }
@@ -578,7 +659,7 @@ export function StudioProvider({
 
 
   const planBuild = React.useCallback(
-    async (idea: string, modeOverride?: WorkflowMode) => {
+    async (idea: string, modeOverride?: WorkflowMode, includeBackend?: boolean) => {
       const activeMode = modeOverride ?? stateRef.current.workflowMode;
       dispatch({ type: "setBusy", busy: true });
       dispatch({ type: "setError", error: null });
@@ -603,6 +684,7 @@ export function StudioProvider({
             projectId,
             prompt: idea,
             workflowMode: activeMode,
+            ...(includeBackend !== undefined ? { includeBackend } : {}),
           }),
         });
         const payload = (await response.json()) as {
@@ -838,9 +920,49 @@ export function StudioProvider({
       dispatch({ type: "setBusy", busy: true });
       dispatch({ type: "setError", error: null });
 
-      const targetPath = diag.filePath
+      // Deterministic 0ms pass first: resolve duplicate imports (e.g., Link from both next/link and lucide-react)
+      // or missing React hooks / directives across all TSX/JSX files before calling the remote QA agent.
+      const deterministicPatched: string[] = [];
+      for (const file of Object.values(stateRef.current.files)) {
+        if (!/\.(tsx|jsx)$/.test(file.filePath)) continue;
+        const outcome = repairSourceCode(file.filePath, file.content);
+        if (outcome.content !== file.content) {
+          writeFile(file.filePath, outcome.content);
+          deterministicPatched.push(file.filePath);
+        }
+      }
+
+      if (deterministicPatched.length > 0) {
+        dispatch({ type: "clearDiagnostics" });
+        dispatch({ type: "setPreviewStatus", status: "ready" });
+        const cp = createCheckpoint("Auto-repair imports");
+        dispatch({
+          type: "addMessage",
+          message: {
+            id: shortId("msg"),
+            projectId,
+            role: "assistant",
+            content: `✨ Fixed import/syntax conflicts automatically in ${deterministicPatched.join(", ")}.`,
+            statusPills: ["Self-Healed"],
+            patchedFiles: deterministicPatched,
+            versionId: cp.id,
+            createdAt: nowIso(),
+          },
+        });
+        dispatch({ type: "setBusy", busy: false });
+        return true;
+      }
+
+      const stackMatch = /((?:\/src\/|src\/)[^\s:)]+\.(?:tsx|ts|jsx|js)):(\d+)/.exec(
+        `${diag.message || ""}\n${diag.stack || ""}`,
+      );
+      const inferredPath = diag.filePath
         ? normalizePath(diag.filePath.replace(/^\//, ""))
+        : stackMatch
+        ? normalizePath(stackMatch[1].replace(/^\//, ""))
         : stateRef.current.activeFilePath || "src/app/page.tsx";
+      const targetPath = inferredPath;
+      const targetLine = diag.line || (stackMatch ? Number(stackMatch[2]) : 1) || 1;
 
       try {
         const response = await authenticatedFetch("/api/orchestrator/qa-fix", {
@@ -853,7 +975,7 @@ export function StudioProvider({
                 filePath: targetPath,
                 message: diag.message,
                 severity: diag.severity || "error",
-                line: diag.line || 1,
+                line: targetLine,
               },
             ],
             files: Object.values(stateRef.current.files).map((f) => ({
@@ -915,21 +1037,115 @@ export function StudioProvider({
     [createCheckpoint, projectId, writeFile],
   );
 
+  const generateDatabaseLayer = React.useCallback(async (): Promise<boolean> => {
+    const req = stateRef.current.requirements;
+    if (!req || !req.dataEntities?.length) {
+      dispatch({
+        type: "setError",
+        error: "No data entities defined in the PRD yet. Plan a full-stack app first.",
+      });
+      return false;
+    }
+
+    dispatch({ type: "setBusy", busy: true });
+    dispatch({ type: "setError", error: null });
+    try {
+      const response = await authenticatedFetch("/api/orchestrator/database", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          productName: req.productName || stateRef.current.projectName,
+          dataEntities: req.dataEntities,
+          existingCollections: Object.values(COLLECTIONS),
+        }),
+      });
+      const payload = (await response.json()) as {
+        ok: boolean;
+        files?: { filePath: string; content: string }[];
+        rules?: string;
+        collections?: { name: string }[];
+        error?: string;
+      };
+      if (!response.ok || !payload.ok || !payload.files) {
+        throw new Error(payload.error ?? `Database generation failed (${response.status})`);
+      }
+
+      const writtenPaths: string[] = [];
+      for (const f of payload.files) {
+        writeFile(f.filePath, f.content);
+        writtenPaths.push(f.filePath);
+      }
+      if (payload.rules && !writtenPaths.includes("firestore.rules")) {
+        writeFile("firestore.rules", payload.rules);
+        writtenPaths.push("firestore.rules");
+      }
+
+      const cp = createCheckpoint("Database layer");
+      dispatch({
+        type: "addMessage",
+        message: {
+          id: shortId("msg"),
+          projectId,
+          role: "assistant",
+          content: `Generated Firestore database repositories and security rules for ${payload.collections?.length ?? req.dataEntities.length} collections.`,
+          statusPills: ["Database Layer", "Firestore Rules"],
+          patchedFiles: writtenPaths,
+          versionId: cp.id,
+          createdAt: nowIso(),
+        },
+      });
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      dispatch({ type: "setError", error: msg });
+      return false;
+    } finally {
+      dispatch({ type: "setBusy", busy: false });
+    }
+  }, [createCheckpoint, projectId, writeFile]);
+
   const restoreVersion = React.useCallback(
-    (versionId: string) => {
-      const snapshot = snapshots.current.get(versionId);
+    async (versionId: string) => {
+      let snapshot = snapshots.current.get(versionId);
+      if (!snapshot) {
+        try {
+          const response = await authenticatedFetch("/api/versions/restore", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ projectId, versionId }),
+          });
+          const payload = (await response.json()) as {
+            ok: boolean;
+            files?: { filePath: string; content: string }[];
+            error?: string;
+          };
+          if (response.ok && payload.ok && Array.isArray(payload.files) && payload.files.length > 0) {
+            const rebuilt: Record<string, string> = {};
+            for (const f of payload.files) rebuilt[f.filePath] = f.content;
+            snapshots.current.set(versionId, rebuilt);
+            snapshot = rebuilt;
+          }
+        } catch (err) {
+          console.warn("Server restore failed:", err);
+        }
+      }
+
       if (!snapshot) {
         dispatch({ type: "setError", error: "That checkpoint's contents are no longer cached." });
         return;
       }
+
       const files: VfsMap = {};
       for (const [path, content] of Object.entries(snapshot)) {
         files[path] = { ...makeVfsFile(path, content), dirty: false };
       }
       dispatch({ type: "setFiles", files });
       const db = getDb();
-      if (db && isFirebaseConfigured) {
-        persistFiles(db, projectId, Object.values(files), "me").catch((err) =>
+      const auth = getFirebaseAuth();
+      const uid = auth?.currentUser?.uid;
+      if (db && isFirebaseConfigured && uid) {
+        persistFiles(db, projectId, Object.values(files), uid).catch((err) =>
           console.warn("Firestore persistFiles skipped:", err),
         );
       }
@@ -948,6 +1164,7 @@ export function StudioProvider({
     const urlPrompt = urlParams.get("prompt");
     const urlMode = urlParams.get("mode") as WorkflowMode | null;
     const urlCategory = urlParams.get("category");
+    const urlFullstack = urlParams.get("fullstack") === "1";
 
     let initialPrompt = urlPrompt;
     let initialMode = urlMode;
@@ -981,7 +1198,7 @@ export function StudioProvider({
 
       (async () => {
         try {
-          await planBuild(combinedPrompt, effectiveMode);
+          await planBuild(combinedPrompt, effectiveMode, urlFullstack || undefined);
           if (effectiveMode === "autonomous") {
             window.setTimeout(() => {
               void runPendingTasks();
@@ -1025,6 +1242,7 @@ export function StudioProvider({
       sendChatMessage,
       planBuild,
       runPendingTasks,
+      generateDatabaseLayer,
       createCheckpoint,
       restoreVersion,
       triggerQaRepair,
@@ -1039,6 +1257,7 @@ export function StudioProvider({
       sendChatMessage,
       planBuild,
       runPendingTasks,
+      generateDatabaseLayer,
       createCheckpoint,
       restoreVersion,
       triggerQaRepair,

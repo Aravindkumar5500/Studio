@@ -215,11 +215,16 @@ export const INSPECTOR_RUNTIME = String.raw`
         root.style.setProperty("--color-background", colors.background);
         document.body.style.backgroundColor = colors.background;
       }
-      var isLight =
-        colors.background === "#ffffff" ||
-        colors.background === "#faf8f5" ||
-        colors.background === "#f1f5f9" ||
-        colors.background === "#f8fafc";
+      var isLight = (function (hex) {
+        if (!hex) return false;
+        var clean = String(hex).trim().replace(/^#/, "");
+        if (clean.length === 3) clean = clean.split("").map(function (c) { return c + c; }).join("");
+        if (!/^[0-9a-fA-F]{6}$/.test(clean)) return false;
+        var r = parseInt(clean.slice(0, 2), 16) / 255;
+        var g = parseInt(clean.slice(2, 4), 16) / 255;
+        var b = parseInt(clean.slice(4, 6), 16) / 255;
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55;
+      })(colors.background);
       var foreground = colors.foreground || (isLight ? "#0f172a" : "#fafafa");
       root.style.setProperty("--color-foreground", foreground);
       document.body.style.color = foreground;
@@ -241,20 +246,36 @@ export const INSPECTOR_RUNTIME = String.raw`
     }
   });
 
+  function extractLocationFromStack(stack) {
+    if (!stack) return { filePath: "", line: 0 };
+    var match = /((?:\/src\/|src\/)[^\s:)]+\.(?:tsx|ts|jsx|js)):(\d+)/.exec(stack);
+    if (match) return { filePath: match[1].replace(/^\//, ""), line: Number(match[2]) || 0 };
+    return { filePath: "", line: 0 };
+  }
+
   // Capture runtime exceptions & unhandled promise rejections inside the preview iframe
   window.addEventListener("error", function (event) {
     try {
-      var file = event.filename || "";
-      var message = event.message || "Unknown runtime error";
-      var line = event.lineno || 0;
-      var col = event.colno || 0;
+      var rawMessage = event.message || (event.error && event.error.message) || "";
       var stack = (event.error && event.error.stack) || "";
+      var loc = extractLocationFromStack(stack);
+      var file = (event.filename ? event.filename.replace(/^https?:\/\/[^/]+/, "").replace(/^\//, "") : "") || loc.filePath;
+      var line = event.lineno || loc.line || 0;
+      var col = event.colno || 0;
+
+      // Cross-origin bundler/eval errors fire a generic "Script error." with no location or stack;
+      // Sandpack's own show-error channel delivers the real compiler/runtime message and file path.
+      if ((!rawMessage || rawMessage === "Script error.") && !file && !line && !stack) {
+        return;
+      }
+
+      var message = rawMessage || "Runtime error in preview";
       parent.postMessage(
         {
           source: "studio-inspector",
           type: "runtime-error",
           diagnostic: {
-            id: "diag_runtime_" + Date.now(),
+            id: "diag_runtime_" + file + "_" + line + "_" + message.slice(0, 64),
             message: message,
             filePath: file,
             line: line,
@@ -274,13 +295,16 @@ export const INSPECTOR_RUNTIME = String.raw`
       var reason = event.reason;
       var msg = (reason && (reason.message || String(reason))) || "Unhandled Promise Rejection";
       var stack = (reason && reason.stack) || "";
+      var loc = extractLocationFromStack(stack);
       parent.postMessage(
         {
           source: "studio-inspector",
           type: "runtime-error",
           diagnostic: {
-            id: "diag_rejection_" + Date.now(),
+            id: "diag_rejection_" + loc.filePath + "_" + loc.line + "_" + msg.slice(0, 64),
             message: msg,
+            filePath: loc.filePath,
+            line: loc.line,
             stack: stack,
             severity: "error",
             timestamp: new Date().toISOString()

@@ -68,16 +68,35 @@ rules_version = '2';
 //   - createdBy: string (required, immutable) - UID of creator
 //   - createdAt: string (required, immutable) - ISO timestamp
 //
+// Collection: version_snapshots/{snapshotId}
+// Document ID: `${versionId}_${pathHash}` (immutable per-file content snapshot)
+// Fields:
+//   - id: string (required, immutable) - Snapshot ID matching document ID
+//   - projectId: string (required, immutable) - Scoped project ID
+//   - versionId: string (required, immutable) - Parent version ID
+//   - filePath: string (required, immutable) - Normalized file path
+//   - language: string (required, immutable) - Source language
+//   - content: string (required, immutable, max 256 KB) - File text content
+//   - sha256: string (required, immutable) - SHA256 checksum
+//   - byteSize: int (required, immutable, <= 256 KB) - Byte size of content
+//   - createdBy: string (required, immutable) - UID of creator
+//   - createdAt: string (required, immutable) - ISO timestamp
+//
 // Collection: requirements/{projectId}
 // Document ID: Project ID string
 // Fields:
 //   - id: string (required, immutable) - Project ID
 //   - projectId: string (required, immutable) - Project ID
 //   - productName: string (required) - Product name
+//   - category: string (optional) - 'website' | 'fullstack_app'
 //   - oneLiner: string (required) - Brief summary
+//   - valueProposition: string (optional) - Core value proposition
 //   - targetUsers: list of strings (required) - Target user personas
+//   - personas: list of maps (optional) - Structured PRD v2 personas
 //   - problemStatement: string (required) - Problem definition
 //   - features: list of maps (required) - Feature breakdown
+//   - pages: list of maps (optional) - Structured PRD v2 pages
+//   - dataEntities: list of maps (optional) - Structured PRD v2 data entities
 //   - userStories: list of maps (required) - User stories
 //   - nonFunctional: list of strings (required) - NFRs
 //   - outOfScope: list of strings (required) - Out of scope items
@@ -321,16 +340,36 @@ service cloud.firestore {
         data.createdAt is string && data.createdAt.size() <= 50;
     }
 
+    function isValidVersionSnapshot(data) {
+      return data.keys().hasAll(['id', 'projectId', 'versionId', 'filePath', 'language', 'content', 'sha256', 'byteSize', 'createdBy', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'projectId', 'versionId', 'filePath', 'language', 'content', 'sha256', 'byteSize', 'createdBy', 'createdAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 200 &&
+        data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 100 &&
+        data.versionId is string && data.versionId.size() > 0 && data.versionId.size() <= 100 &&
+        data.filePath is string && data.filePath.size() > 0 && data.filePath.size() <= 500 &&
+        data.language in ['typescript', 'tsx', 'javascript', 'jsx', 'css', 'json', 'markdown', 'html', 'plaintext'] &&
+        data.content is string && data.content.size() <= 256 * 1024 &&
+        data.sha256 is string && data.sha256.size() <= 100 &&
+        data.byteSize is int && data.byteSize >= 0 && data.byteSize <= 256 * 1024 &&
+        data.createdBy is string && data.createdBy.size() <= 128 &&
+        data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
     function isValidRequirements(data) {
       return data.keys().hasAll(['id', 'projectId', 'productName', 'oneLiner', 'targetUsers', 'problemStatement', 'features', 'userStories', 'nonFunctional', 'outOfScope', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['id', 'projectId', 'productName', 'oneLiner', 'targetUsers', 'problemStatement', 'features', 'userStories', 'nonFunctional', 'outOfScope', 'approvedBy', 'approvedAt', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'projectId', 'productName', 'category', 'oneLiner', 'valueProposition', 'targetUsers', 'personas', 'problemStatement', 'features', 'pages', 'dataEntities', 'userStories', 'nonFunctional', 'outOfScope', 'approvedBy', 'approvedAt', 'createdAt', 'updatedAt']) &&
         data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
         data.projectId is string && data.projectId.size() > 0 && data.projectId.size() <= 100 &&
         data.productName is string && data.productName.size() <= 200 &&
+        (!('category' in data) || data.category in ['website', 'fullstack_app']) &&
         data.oneLiner is string && data.oneLiner.size() <= 500 &&
+        (!('valueProposition' in data) || (data.valueProposition is string && data.valueProposition.size() <= 2000)) &&
         data.targetUsers is list && data.targetUsers.size() <= 50 &&
+        (!('personas' in data) || (data.personas is list && data.personas.size() <= 50)) &&
         data.problemStatement is string && data.problemStatement.size() <= 10000 &&
         data.features is list && data.features.size() <= 200 &&
+        (!('pages' in data) || (data.pages is list && data.pages.size() <= 100)) &&
+        (!('dataEntities' in data) || (data.dataEntities is list && data.dataEntities.size() <= 100)) &&
         data.userStories is list && data.userStories.size() <= 200 &&
         data.nonFunctional is list && data.nonFunctional.size() <= 100 &&
         data.outOfScope is list && data.outOfScope.size() <= 100 &&
@@ -370,7 +409,7 @@ service cloud.firestore {
         data.dependsOn is list && data.dependsOn.size() <= 100 &&
         data.exportedSymbols is list && data.exportedSymbols.size() <= 200 &&
         data.order is int && data.order >= 0 &&
-        data.status in ['pending', 'awaiting_approval', 'running', 'succeeded', 'failed', 'skipped'] &&
+        data.status in ['pending', 'awaiting_approval', 'running', 'validating', 'repairing', 'succeeded', 'failed', 'skipped'] &&
         data.attempts is int && data.attempts >= 0 &&
         (!('error' in data) || data.error == null || (data.error is string && data.error.size() <= 10000)) &&
         data.tokensIn is int && data.tokensIn >= 0 &&
@@ -548,6 +587,16 @@ service cloud.firestore {
         canWriteProject(request.resource.data.projectId) &&
         isValidProjectVersion(request.resource.data) &&
         request.resource.data.id == versionId;
+      allow update, delete: if false;
+    }
+
+    // 5b. Version Snapshots Collection (Immutable Per-File Content Snapshots)
+    match /version_snapshots/{snapshotId} {
+      allow read: if isSignedIn() && isProjectMember(resource.data.projectId);
+      allow create: if isSignedIn() &&
+        canWriteProject(request.resource.data.projectId) &&
+        isValidVersionSnapshot(request.resource.data) &&
+        request.resource.data.id == snapshotId;
       allow update, delete: if false;
     }
 

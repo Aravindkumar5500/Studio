@@ -25,7 +25,18 @@ const envModel = (name: string, fallback: string): string => {
   return value ? value : fallback;
 };
 
-export const GEMINI_MODEL = envModel("GEMINI_MODEL", "gemini-3.1-flash-lite");
+const envModelList = (name: string, primary: string): string[] => {
+  const raw = process.env[name]?.trim();
+  const extras = raw
+    ? raw
+        .split(",")
+        .map((m) => m.trim())
+        .filter(Boolean)
+    : [];
+  return [primary, ...extras].filter((m, i, arr) => arr.indexOf(m) === i);
+};
+
+export const GEMINI_MODEL = envModel("GEMINI_MODEL", "gemini-2.5-flash");
 export const GROQ_MODEL = envModel("GROQ_MODEL", "llama-3.3-70b-versatile");
 
 /**
@@ -178,9 +189,7 @@ async function callGemini(
   const apiKey = requireEnv("GEMINI_API_KEY", "gemini");
   const client = new GoogleGenerativeAI(apiKey);
 
-  const candidateModels = [GEMINI_MODEL, "gemini-3.1-flash-lite"].filter(
-    (m, i, arr) => arr.indexOf(m) === i,
-  );
+  const candidateModels = envModelList("GEMINI_FALLBACK_MODELS", GEMINI_MODEL);
 
   let lastError: unknown;
   for (const modelId of candidateModels) {
@@ -271,9 +280,7 @@ async function callGroq(
   const apiKey = requireEnv("GROQ_API_KEY", "groq");
   const client = new Groq({ apiKey });
   const effectiveMaxTokens = Math.min(maxOutputTokens || 4096, 4096);
-  const candidateModels = [GROQ_MODEL, "llama-3.3-70b-versatile", "openai/gpt-oss-120b"].filter(
-    (m, i, arr) => arr.indexOf(m) === i,
-  );
+  const candidateModels = envModelList("GROQ_FALLBACK_MODELS", GROQ_MODEL);
 
   let lastError: unknown;
   for (const modelId of candidateModels) {

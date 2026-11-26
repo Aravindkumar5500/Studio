@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { PlanRequestSchema, validateDag } from "@/lib/ai/schemas";
-import { architectAgent, productAgent, uiuxAgent } from "@/lib/ai/agents";
+import { ensureScaffoldTasks, normalizeTaskRoles } from "@/lib/ai/scaffold";
+import { architectAgent, productAgent, uiuxAgent, ROLE_PROVIDER } from "@/lib/ai/agents";
 import { runAgent } from "@/lib/ai/run-agent";
-import { nowIso, shortId } from "@/lib/utils";
+import { byteSize, nowIso, shortId } from "@/lib/utils";
 import type { ApprovalDoc, GenerationTaskDoc } from "@/types/firestore";
 import { COLLECTIONS } from "@/types/firestore";
 import { errorResponse } from "@/lib/api/errors";
 import { requireProjectAccess } from "@/lib/firebase/auth-guard";
 import { getDeterministicSetupFiles } from "@/lib/vfs/deterministic";
+import { detectLanguage, extractExportSignatures, extractImports } from "@/lib/vfs/analyze";
+import { sha256Sync, sourceFileDocId } from "@/lib/hash";
 import { getAdminDb } from "@/lib/firebase/admin";
 
 export const runtime = "nodejs";
@@ -41,7 +44,7 @@ export async function POST(request: Request) {
           {
             id: body.projectId,
             ownerId: auth.user.uid,
-            name: prd.data.productName || "Studio Project",
+            name: prd.data.productName || body.projectId,
             slug: body.projectId,
             description: prd.data.oneLiner || "AI-generated Studio application",
             status: "ready",
@@ -104,11 +107,12 @@ export async function POST(request: Request) {
       });
     }
 
-    // Cap tasks to AT MOST 4 tasks for ~20-30s fast generation
-    if (rawTasks.length > 4) {
+    // Cap tasks: 4 for websites (~20s), up to 5 for fullstack_app (includes API route)
+    const maxTasks = prd.data.category === "fullstack_app" || body.includeBackend ? 5 : 4;
+    if (rawTasks.length > maxTasks) {
       const pageTask = rawTasks.find((t) => t.targetFilePath.includes("page.tsx"))!;
       const nonPageTasks = rawTasks.filter((t) => !t.targetFilePath.includes("page.tsx"));
-      rawTasks = [...nonPageTasks.slice(0, 3), pageTask];
+      rawTasks = [...nonPageTasks.slice(0, maxTasks - 1), pageTask];
     }
 
     // Clean dependencies to only reference retained tasks
@@ -116,6 +120,19 @@ export async function POST(request: Request) {
     for (const task of rawTasks) {
       task.dependencies = task.dependencies.filter((dep) => retainedIds.has(dep));
     }
+
+    // The shell is normally seeded into the VFS and deliberately excluded
+    // above. If the caller reports it missing, plan it after all.
+    let scaffoldInjected: string[] = [];
+    if (body.existingFiles.length) {
+      const scaffold = ensureScaffoldTasks(rawTasks, body.existingFiles);
+      rawTasks = scaffold.tasks;
+      scaffoldInjected = scaffold.injected;
+    }
+
+    // The target path, not the model's label, decides which agent writes a file.
+    const roleFix = normalizeTaskRoles(rawTasks);
+    rawTasks = roleFix.tasks;
 
     const dagCheck = validateDag(rawTasks);
     if (!dagCheck.ok) {
@@ -133,7 +150,7 @@ export async function POST(request: Request) {
         title: task.title,
         description: task.description,
         agentRole: task.agentRole,
-        provider: "groq",
+        provider: task.provider || ROLE_PROVIDER[task.agentRole] || "groq",
         targetFilePath: task.targetFilePath,
         requiredContextFiles: task.requiredContextFiles,
         dependsOn: task.dependencies,
@@ -171,6 +188,70 @@ export async function POST(request: Request) {
           ]
         : [];
 
+    if (adminDb) {
+      const ts = nowIso();
+      const batch = adminDb.batch();
+      batch.set(
+        adminDb.collection(COLLECTIONS.requirements).doc(body.projectId),
+        {
+          id: body.projectId,
+          projectId: body.projectId,
+          ...prd.data,
+          targetUsers: prd.data.personas.map((p) => p.name),
+          approvedBy: null,
+          approvedAt: null,
+          createdAt: ts,
+          updatedAt: ts,
+        },
+        { merge: true },
+      );
+      batch.set(
+        adminDb.collection(COLLECTIONS.designSystems).doc(body.projectId),
+        {
+          id: body.projectId,
+          projectId: body.projectId,
+          ...design.data,
+          createdAt: ts,
+          updatedAt: ts,
+        },
+        { merge: true },
+      );
+      for (const task of tasks) {
+        batch.set(
+          adminDb.collection(COLLECTIONS.generationTasks).doc(`${body.projectId}_${task.id}`),
+          task,
+          { merge: true },
+        );
+      }
+      for (const approval of approvals) {
+        batch.set(adminDb.collection(COLLECTIONS.approvals).doc(approval.id), approval, { merge: true });
+      }
+      for (const file of deterministicFiles) {
+        const docId = sourceFileDocId(body.projectId, file.filePath);
+        batch.set(
+          adminDb.collection(COLLECTIONS.sourceFiles).doc(docId),
+          {
+            id: docId,
+            projectId: body.projectId,
+            filePath: file.filePath,
+            language: detectLanguage(file.filePath),
+            content: file.content,
+            sha256: sha256Sync(file.content),
+            byteSize: byteSize(file.content),
+            exportSignatures: extractExportSignatures(file.content),
+            imports: extractImports(file.content),
+            lastModifiedBy: auth.user.uid,
+            createdAt: ts,
+            updatedAt: ts,
+          },
+          { merge: true },
+        );
+      }
+      await batch.commit().catch((err) => {
+        console.warn("Firestore batch persist skipped during plan:", err);
+      });
+    }
+
     return NextResponse.json({
       ok: true,
       requirements: prd.data,
@@ -179,6 +260,8 @@ export async function POST(request: Request) {
       deterministicFiles,
       tasks,
       approvals,
+      scaffoldInjected,
+      rolesCorrected: roleFix.corrected,
       usage: { product: prd.usage, design: design.usage, architect: architecture.usage },
     });
   } catch (error) {

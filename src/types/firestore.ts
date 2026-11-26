@@ -100,7 +100,7 @@ export interface RequirementFeature {
   id: string;
   title: string;
   description: string;
-  priority: "p0" | "p1" | "p2";
+  priority: "P0" | "P1" | "P2";
   acceptanceCriteria: string[];
 }
 
@@ -218,6 +218,20 @@ export interface VersionManifestEntry {
   byteSize: number;
 }
 
+/** version_snapshots/{versionId}_{pathHash} — immutable file snapshot for durable restores. */
+export interface VersionSnapshotDoc {
+  id: string;
+  projectId: string;
+  versionId: string;
+  filePath: string;
+  language: SourceLanguage;
+  content: string;
+  sha256: string;
+  byteSize: number;
+  createdBy: string;
+  createdAt: ISODate;
+}
+
 /** build_runs/{runId} */
 export interface BuildRunDoc {
   id: string;
@@ -280,6 +294,7 @@ export const COLLECTIONS = {
   generationTasks: "generation_tasks",
   conversations: "conversations",
   projectVersions: "project_versions",
+  versionSnapshots: "version_snapshots",
   buildRuns: "build_runs",
   testRuns: "test_runs",
   approvals: "approvals",
