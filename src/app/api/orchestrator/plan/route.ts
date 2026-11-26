@@ -6,6 +6,7 @@ import { architectAgent, productAgent, uiuxAgent, ROLE_PROVIDER } from "@/lib/ai
 import { runAgent } from "@/lib/ai/run-agent";
 import { byteSize, nowIso, shortId } from "@/lib/utils";
 import type { ApprovalDoc, GenerationTaskDoc } from "@/types/firestore";
+import type { DagTaskNode } from "@/lib/ai/schemas";
 import { COLLECTIONS } from "@/types/firestore";
 import { errorResponse } from "@/lib/api/errors";
 import { requireProjectAccess } from "@/lib/firebase/auth-guard";
@@ -18,15 +19,12 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 /**
- * The planning pass:
- *   Product Agent (Gemini) -> UI/UX Agent (Groq) -> Architect Agent (Gemini)
- * Returns the PRD, the design system, zero-LLM deterministic setup files,
- * and a compact 3-to-4 task build DAG.
+ * Planning pipeline: PRD -> design system -> complete architecture DAG.
+ * Task count is driven by the PRD, never by a fixed website/full-stack cap.
  */
 export async function POST(request: Request) {
   try {
     const body = PlanRequestSchema.parse(await request.json());
-
     const auth = await requireProjectAccess(request, body.projectId, ["owner", "editor"], true);
     if (!auth.ok) return auth.response;
 
@@ -37,25 +35,21 @@ export async function POST(request: Request) {
 
     const adminDb = getAdminDb();
     if (adminDb) {
-      await adminDb
-        .collection(COLLECTIONS.projects)
-        .doc(body.projectId)
-        .set(
-          {
-            id: body.projectId,
-            ownerId: auth.user.uid,
-            name: prd.data.productName || body.projectId,
-            slug: body.projectId,
-            description: prd.data.oneLiner || "AI-generated Studio application",
-            status: "ready",
-            workflowMode: body.workflowMode,
-            framework: "nextjs",
-            entryFilePath: "src/app/page.tsx",
-            updatedAt: nowIso(),
-          },
-          { merge: true },
-        )
-        .catch(() => {});
+      await adminDb.collection(COLLECTIONS.projects).doc(body.projectId).set(
+        {
+          id: body.projectId,
+          ownerId: auth.user.uid,
+          name: prd.data.productName || body.projectId,
+          slug: body.projectId,
+          description: prd.data.oneLiner || "AI-generated Studio application",
+          status: "ready",
+          workflowMode: body.workflowMode,
+          framework: "nextjs",
+          entryFilePath: "src/app/page.tsx",
+          updatedAt: nowIso(),
+        },
+        { merge: true },
+      ).catch(() => {});
     }
 
     const design = await runAgent(uiuxAgent, {
@@ -70,14 +64,12 @@ export async function POST(request: Request) {
       designSystemJson: JSON.stringify(design.data),
     });
 
-    // Zero-LLM deterministic setup files for instant mounting
     const deterministicFiles = getDeterministicSetupFiles(
       prd.data.productName || "Studio App",
       design.data,
     );
 
-    // Filter out setup files that are generated deterministically
-    const SETUP_PATHS = new Set([
+    const setupPaths = new Set([
       "src/app/layout.tsx",
       "src/app/globals.css",
       "src/theme/tokens.ts",
@@ -85,44 +77,104 @@ export async function POST(request: Request) {
       "app/globals.css",
     ]);
 
-    let rawTasks = architecture.data.tasks.filter((task) => {
-      const target = task.targetFilePath.toLowerCase().trim();
-      return !SETUP_PATHS.has(target) && !/layout\.tsx|globals\.css|tokens\.ts/.test(target);
-    });
+    let rawTasks = architecture.data.tasks.filter(
+      (task) => !setupPaths.has(normalizePath(task.targetFilePath)),
+    );
 
-    // If architect omitted page.tsx, ensure page task exists
-    const hasPage = rawTasks.some((t) => t.targetFilePath.includes("page.tsx"));
-    if (!hasPage) {
-      rawTasks.push({
-        taskId: "task_page",
-        title: "Assemble main page",
-        description: `Assemble interactive ${prd.data.productName} application page with stateful widgets`,
-        agentRole: "frontend",
-        provider: "groq",
-        order: 9,
-        targetFilePath: "src/app/page.tsx",
-        dependencies: rawTasks.map((t) => t.taskId),
-        requiredContextFiles: rawTasks.map((t) => t.targetFilePath),
-        exportedSymbols: ["export default function HomePage"],
+    // The PRD is the source of truth for route coverage. Canonicalize route
+    // files and add a page task for every route the architect accidentally omitted.
+    const routeRecords = prd.data.pages.map((page) => ({
+      path: normalizeRoute(page.route),
+      filePath: appFileForRoute(page.route),
+      purpose: page.purpose,
+    }));
+
+    if (!routeRecords.some((route) => route.path === "/")) {
+      routeRecords.unshift({
+        path: "/",
+        filePath: "src/app/page.tsx",
+        purpose: `Application home for ${prd.data.productName}`,
       });
     }
 
-    // Cap tasks: 4 for websites (~20s), up to 5 for fullstack_app (includes API route)
-    const maxTasks = prd.data.category === "fullstack_app" || body.includeBackend ? 5 : 4;
-    if (rawTasks.length > maxTasks) {
-      const pageTask = rawTasks.find((t) => t.targetFilePath.includes("page.tsx"))!;
-      const nonPageTasks = rawTasks.filter((t) => !t.targetFilePath.includes("page.tsx"));
-      rawTasks = [...nonPageTasks.slice(0, maxTasks - 1), pageTask];
+    const routePathSet = new Set<string>();
+    for (const route of routeRecords) {
+      if (routePathSet.has(route.path)) {
+        return NextResponse.json(
+          { ok: false, error: `The PRD contains duplicate route "${route.path}". Fix the PRD before planning.` },
+          { status: 422 },
+        );
+      }
+      routePathSet.add(route.path);
     }
 
-    // Clean dependencies to only reference retained tasks
-    const retainedIds = new Set(rawTasks.map((t) => t.taskId));
+    const routeFilePaths = new Set(routeRecords.map((route) => normalizePath(route.filePath)));
+    const pageTasks = rawTasks.filter((task) => isPageFile(task.targetFilePath));
+    const canonicalPageTasks = new Map<string, DagTaskNode>();
+
+    for (const task of pageTasks) {
+      const match = routeRecords.find((route) =>
+        normalizePath(task.targetFilePath) === normalizePath(route.filePath),
+      );
+      if (match) canonicalPageTasks.set(normalizePath(match.filePath), task);
+    }
+
+    let nextOrder = rawTasks.reduce((max, task) => Math.max(max, task.order), -1) + 1;
+    for (const route of routeRecords) {
+      const key = normalizePath(route.filePath);
+      const existing = canonicalPageTasks.get(key);
+      if (existing) {
+        existing.title = `Build ${route.path === "/" ? "home" : route.path} page`;
+        existing.description = route.purpose;
+        existing.exportedSymbols = ["export default function Page"];
+        continue;
+      }
+
+      const taskId = uniqueTaskId(`page_${route.path === "/" ? "home" : route.path.replace(/[^a-zA-Z0-9]+/g, "_")}`, rawTasks);
+      rawTasks.push({
+        taskId,
+        title: `Build ${route.path === "/" ? "home" : route.path} page`,
+        description: route.purpose,
+        agentRole: "frontend",
+        provider: "groq",
+        order: nextOrder++,
+        targetFilePath: route.filePath,
+        dependencies: [],
+        requiredContextFiles: [],
+        exportedSymbols: ["export default function Page"],
+      });
+    }
+
+    // Drop tasks that target the same file as a PRD route under a non-page role;
+    // the page task is the sole writer for that App Router page file.
+    rawTasks = rawTasks.filter((task) => {
+      if (!routeFilePaths.has(normalizePath(task.targetFilePath))) return true;
+      return isPageFile(task.targetFilePath);
+    });
+
+    // Fail closed on ambiguous DAGs instead of silently dropping nodes or edges.
+    const taskIds = new Set<string>();
+    const targetPaths = new Set<string>();
     for (const task of rawTasks) {
-      task.dependencies = task.dependencies.filter((dep) => retainedIds.has(dep));
+      const taskPath = normalizePath(task.targetFilePath);
+      if (taskIds.has(task.taskId)) {
+        return NextResponse.json(
+          { ok: false, error: `The architect produced duplicate task id "${task.taskId}".` },
+          { status: 502 },
+        );
+      }
+      if (targetPaths.has(taskPath)) {
+        return NextResponse.json(
+          { ok: false, error: `The architect assigned more than one task to "${task.targetFilePath}". Each file must have exactly one task.` },
+          { status: 502 },
+        );
+      }
+      taskIds.add(task.taskId);
+      targetPaths.add(taskPath);
     }
 
-    // The shell is normally seeded into the VFS and deliberately excluded
-    // above. If the caller reports it missing, plan it after all.
+    // The shell is normally seeded into the VFS. Inject mandatory shell tasks
+    // only when the caller supplies an explicit existing-file inventory.
     let scaffoldInjected: string[] = [];
     if (body.existingFiles.length) {
       const scaffold = ensureScaffoldTasks(rawTasks, body.existingFiles);
@@ -130,9 +182,11 @@ export async function POST(request: Request) {
       scaffoldInjected = scaffold.injected;
     }
 
-    // The target path, not the model's label, decides which agent writes a file.
     const roleFix = normalizeTaskRoles(rawTasks);
-    rawTasks = roleFix.tasks;
+    rawTasks = roleFix.tasks.map((task) => ({
+      ...task,
+      provider: ROLE_PROVIDER[task.agentRole] || task.provider,
+    }));
 
     const dagCheck = validateDag(rawTasks);
     if (!dagCheck.ok) {
@@ -150,7 +204,7 @@ export async function POST(request: Request) {
         title: task.title,
         description: task.description,
         agentRole: task.agentRole,
-        provider: task.provider || ROLE_PROVIDER[task.agentRole] || "groq",
+        provider: ROLE_PROVIDER[task.agentRole] || task.provider,
         targetFilePath: task.targetFilePath,
         requiredContextFiles: task.requiredContextFiles,
         dependsOn: task.dependencies,
@@ -167,85 +221,68 @@ export async function POST(request: Request) {
         updatedAt: nowIso(),
       }));
 
-    const approvals: ApprovalDoc[] =
-      body.workflowMode === "guided"
-        ? [
-            makeApproval(
-              body.projectId,
-              "prd",
-              `PRD for ${prd.data.productName} — ${prd.data.features.filter((f) => f.priority === "P0").length} P0 features across ${prd.data.pages.length} pages.`,
-            ),
-            makeApproval(
-              body.projectId,
-              "design_system",
-              `Design system "${design.data.name}" with ${Object.keys(design.data.colors).length} semantic tokens.`,
-            ),
-            makeApproval(
-              body.projectId,
-              "architecture",
-              `${tasks.length} generation tasks across ${new Set(tasks.map((t) => t.agentRole)).size} agents.`,
-            ),
-          ]
-        : [];
+    const approvals: ApprovalDoc[] = body.workflowMode === "guided"
+      ? [
+          makeApproval(
+            body.projectId,
+            "prd",
+            `PRD for ${prd.data.productName} — ${prd.data.features.filter((f) => f.priority === "P0").length} P0 features across ${routeRecords.length} routes.`,
+          ),
+          makeApproval(
+            body.projectId,
+            "design_system",
+            `Design system "${design.data.name}" with ${Object.keys(design.data.colors).length} semantic tokens.`,
+          ),
+          makeApproval(
+            body.projectId,
+            "architecture",
+            `${tasks.length} generation tasks across ${new Set(tasks.map((task) => task.agentRole)).size} agent roles.`,
+          ),
+        ]
+      : [];
 
     if (adminDb) {
       const ts = nowIso();
       const batch = adminDb.batch();
-      batch.set(
-        adminDb.collection(COLLECTIONS.requirements).doc(body.projectId),
-        {
-          id: body.projectId,
-          projectId: body.projectId,
-          ...prd.data,
-          targetUsers: prd.data.personas.map((p) => p.name),
-          approvedBy: null,
-          approvedAt: null,
-          createdAt: ts,
-          updatedAt: ts,
-        },
-        { merge: true },
-      );
-      batch.set(
-        adminDb.collection(COLLECTIONS.designSystems).doc(body.projectId),
-        {
-          id: body.projectId,
-          projectId: body.projectId,
-          ...design.data,
-          createdAt: ts,
-          updatedAt: ts,
-        },
-        { merge: true },
-      );
+      batch.set(adminDb.collection(COLLECTIONS.requirements).doc(body.projectId), {
+        id: body.projectId,
+        projectId: body.projectId,
+        ...prd.data,
+        targetUsers: prd.data.personas.map((persona) => persona.name),
+        approvedBy: null,
+        approvedAt: null,
+        createdAt: ts,
+        updatedAt: ts,
+      }, { merge: true });
+      batch.set(adminDb.collection(COLLECTIONS.designSystems).doc(body.projectId), {
+        id: body.projectId,
+        projectId: body.projectId,
+        ...design.data,
+        createdAt: ts,
+        updatedAt: ts,
+      }, { merge: true });
       for (const task of tasks) {
-        batch.set(
-          adminDb.collection(COLLECTIONS.generationTasks).doc(`${body.projectId}_${task.id}`),
-          task,
-          { merge: true },
-        );
+        batch.set(adminDb.collection(COLLECTIONS.generationTasks).doc(`${body.projectId}_${task.id}`), task, { merge: true });
       }
       for (const approval of approvals) {
         batch.set(adminDb.collection(COLLECTIONS.approvals).doc(approval.id), approval, { merge: true });
       }
       for (const file of deterministicFiles) {
         const docId = sourceFileDocId(body.projectId, file.filePath);
-        batch.set(
-          adminDb.collection(COLLECTIONS.sourceFiles).doc(docId),
-          {
-            id: docId,
-            projectId: body.projectId,
-            filePath: file.filePath,
-            language: detectLanguage(file.filePath),
-            content: file.content,
-            sha256: sha256Sync(file.content),
-            byteSize: byteSize(file.content),
-            exportSignatures: extractExportSignatures(file.content),
-            imports: extractImports(file.content),
-            lastModifiedBy: auth.user.uid,
-            createdAt: ts,
-            updatedAt: ts,
-          },
-          { merge: true },
-        );
+        batch.set(adminDb.collection(COLLECTIONS.sourceFiles).doc(docId), {
+          id: docId,
+          projectId: body.projectId,
+          filePath: file.filePath,
+          language: detectLanguage(file.filePath),
+          content: file.content,
+          sha256: sha256Sync(file.content),
+          byteSize: byteSize(file.content),
+          exportSignatures: extractExportSignatures(file.content),
+          imports: extractImports(file.content),
+          lastModifiedBy: auth.user.uid,
+          createdAt: ts,
+          updatedAt: ts,
+        }, { merge: true });
       }
       await batch.commit().catch((err) => {
         console.warn("Firestore batch persist skipped during plan:", err);
@@ -256,7 +293,7 @@ export async function POST(request: Request) {
       ok: true,
       requirements: prd.data,
       designSystem: design.data,
-      architecture: architecture.data,
+      architecture: { ...architecture.data, routes: routeRecords, tasks: rawTasks },
       deterministicFiles,
       tasks,
       approvals,
@@ -271,8 +308,48 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    if (error instanceof Error && error.message.startsWith("Invalid PRD route:")) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 422 });
+    }
     return errorResponse(error);
   }
+}
+
+function normalizePath(filePath: string): string {
+  return filePath.replace(/\\/g, "/").replace(/^\.?\//, "").toLowerCase();
+}
+
+function normalizeRoute(route: string): string {
+  const trimmed = route.trim().replace(/\\/g, "/");
+  if (!trimmed.startsWith("/") || trimmed.includes("?") || trimmed.includes("#")) {
+    throw new Error(`Invalid PRD route: "${route}" must be an absolute pathname without query/hash.`);
+  }
+  const segments = trimmed.split("/").filter(Boolean).map((segment) => {
+    if (segment === "." || segment === ".." || !/^[a-zA-Z0-9_.\-[\]]+$/.test(segment)) {
+      throw new Error(`Invalid PRD route: "${route}" contains an unsupported segment "${segment}".`);
+    }
+    return segment.startsWith(":") ? `[${segment.slice(1)}]` : segment;
+  });
+  return segments.length ? `/${segments.join("/")}` : "/";
+}
+
+function appFileForRoute(route: string): string {
+  const normalized = normalizeRoute(route);
+  return normalized === "/"
+    ? "src/app/page.tsx"
+    : `src/app/${normalized.slice(1)}/page.tsx`;
+}
+
+function isPageFile(filePath: string): boolean {
+  return /(^|\/)page\.[jt]sx?$/i.test(filePath.replace(/\\/g, "/"));
+}
+
+function uniqueTaskId(base: string, tasks: DagTaskNode[]): string {
+  const used = new Set(tasks.map((task) => task.taskId));
+  let candidate = base;
+  let suffix = 2;
+  while (used.has(candidate)) candidate = `${base}_${suffix++}`;
+  return candidate;
 }
 
 function makeApproval(
