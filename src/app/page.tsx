@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowRight, ArrowUpRight, BriefcaseBusiness, CalendarDays, Check,
   Clock3, Code2, Command, FolderOpen, Globe2, Layers3, LayoutDashboard,
-  Plus, ShoppingBag, Trash2, Zap
+  ShoppingBag, Trash2, Zap
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
