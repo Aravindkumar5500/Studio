@@ -1,0 +1,206 @@
+{
+  "categories": [
+    {
+      "id": "Website Builder",
+      "label": "Landing Page",
+      "subtitle": "Modern marketing website",
+      "previewVariant": "landing",
+      "icon": "globe",
+      "placeholder": "Modern landing page with hero, features grid, pricing table, and testimonials"
+    },
+    {
+      "id": "CRM / Dashboard",
+      "label": "CRM Dashboard",
+      "subtitle": "Leads, pipeline and analytics",
+      "previewVariant": "crm",
+      "icon": "layout-dashboard",
+      "placeholder": "Build a clean Sales CRM dashboard with leads table and pipeline stats"
+    },
+    {
+      "id": "E-Commerce",
+      "label": "E-commerce Store",
+      "subtitle": "Products, cart and payments",
+      "previewVariant": "ecommerce",
+      "icon": "shopping-cart",
+      "placeholder": "Minimalist storefront with product catalog, filter tabs, cart drawer, and checkout summary"
+    },
+    {
+      "id": "Booking System",
+      "label": "Booking System",
+      "subtitle": "Appointments and scheduling",
+      "previewVariant": "booking",
+      "icon": "calendar",
+      "placeholder": "Salon appointment booking SaaS with specialist picker, calendar slots, and confirmation flow"
+    },
+    {
+      "id": "Data Visualization",
+      "label": "Data Visualization",
+      "subtitle": "Interactive charts and reports",
+      "previewVariant": "dataviz",
+      "icon": "bar-chart",
+      "placeholder": "Interactive analytics dashboard with KPI cards, filterable charts, and exportable tables"
+    }
+  ],
+  "starters": [
+    {
+      "category": "CRM / Dashboard",
+      "prompt": "Build a CRM dashboard"
+    },
+    {
+      "category": "E-Commerce",
+      "prompt": "E-commerce store"
+    },
+    {
+      "category": "Booking System",
+      "prompt": "Booking system"
+    },
+    {
+      "category": "Data Visualization",
+      "prompt": "Data visualization app"
+    }
+  ],
+  "themes": [
+    {
+      "id": "editorial-ivory",
+      "label": "Warm Ivory Studio",
+      "subtitle": "Warm ivory surfaces & burnt orange accent",
+      "badge": "Light Mode",
+      "isLight": true,
+      "primary": "#ea580c",
+      "accent": "#c2410c",
+      "background": "#faf7f2",
+      "surface": "#ffffff",
+      "border": "#e6dfd5",
+      "previewGradient": "from-[#faf7f2] via-white to-orange-200 border border-stone-300"
+    },
+    {
+      "id": "charcoal-ember",
+      "label": "Charcoal Ember",
+      "subtitle": "Warm dark charcoal & burnt orange accent",
+      "badge": "Dark Theme",
+      "isLight": false,
+      "primary": "#f97316",
+      "accent": "#ea580c",
+      "background": "#131210",
+      "surface": "#1b1917",
+      "border": "#312d29",
+      "previewGradient": "from-stone-900 to-orange-600"
+    },
+    {
+      "id": "light-studio",
+      "label": "Clean Light Studio",
+      "subtitle": "Crisp white, slate surfaces & emerald accent",
+      "badge": "Light Mode",
+      "isLight": true,
+      "primary": "#10b981",
+      "accent": "#059669",
+      "background": "#ffffff",
+      "surface": "#f8fafc",
+      "border": "#e2e8f0",
+      "previewGradient": "from-white via-slate-100 to-emerald-200 border border-zinc-300"
+    },
+    {
+      "id": "editorial-cream",
+      "label": "Warm Editorial Cream",
+      "subtitle": "Warm ivory background & terracotta accent",
+      "badge": "Light Editorial",
+      "isLight": true,
+      "primary": "#d97706",
+      "accent": "#ea580c",
+      "background": "#faf8f5",
+      "surface": "#f3efe6",
+      "border": "#e7dfd1",
+      "previewGradient": "from-[#faf8f5] via-[#f3efe6] to-amber-200 border border-amber-300"
+    },
+    {
+      "id": "nordic-slate",
+      "label": "Nordic Clean Slate",
+      "subtitle": "Airy cool-gray surfaces & crisp indigo primary",
+      "badge": "Light SaaS",
+      "isLight": true,
+      "primary": "#4f46e5",
+      "accent": "#0ea5e9",
+      "background": "#f1f5f9",
+      "surface": "#ffffff",
+      "border": "#cbd5e1",
+      "previewGradient": "from-slate-100 via-white to-indigo-200 border border-slate-300"
+    },
+    {
+      "id": "obsidian",
+      "label": "Emerald Obsidian",
+      "subtitle": "Vercel / Supabase style deep zinc & emerald",
+      "badge": "Dark Theme",
+      "isLight": false,
+      "primary": "#10b981",
+      "accent": "#06b6d4",
+      "background": "#09090b",
+      "surface": "#18181b",
+      "border": "#27272a",
+      "previewGradient": "from-emerald-400 to-teal-500"
+    }
+  ],
+  "inspector": {
+    "spacingSteps": ["0", "1", "2", "3", "4", "5", "6", "8", "10", "12", "16", "20", "24"],
+    "fontSizes": [
+      { "label": "XS", "value": "text-xs" },
+      { "label": "SM", "value": "text-sm" },
+      { "label": "Base", "value": "text-base" },
+      { "label": "LG", "value": "text-lg" },
+      { "label": "XL", "value": "text-xl" },
+      { "label": "2XL", "value": "text-2xl" },
+      { "label": "3XL", "value": "text-3xl" }
+    ],
+    "fontWeights": [
+      { "label": "Light", "value": "font-light" },
+      { "label": "Normal", "value": "font-normal" },
+      { "label": "Medium", "value": "font-medium" },
+      { "label": "Semibold", "value": "font-semibold" },
+      { "label": "Bold", "value": "font-bold" }
+    ],
+    "breakpoints": [
+      { "id": "", "label": "Base", "sub": "All screens" },
+      { "id": "sm:", "label": "sm", "sub": "640px" },
+      { "id": "md:", "label": "md", "sub": "768px" },
+      { "id": "lg:", "label": "lg", "sub": "1024px" },
+      { "id": "xl:", "label": "xl", "sub": "1280px" }
+    ],
+    "baseColorTokens": [
+      { "name": "emerald-500", "className": "emerald-500", "swatch": "#10b981" },
+      { "name": "teal-500", "className": "teal-500", "swatch": "#14b8a6" },
+      { "name": "cyan-500", "className": "cyan-500", "swatch": "#06b6d4" },
+      { "name": "sky-500", "className": "sky-500", "swatch": "#0ea5e9" },
+      { "name": "violet-600", "className": "violet-600", "swatch": "#7c3aed" },
+      { "name": "amber-500", "className": "amber-500", "swatch": "#f59e0b" },
+      { "name": "rose-500", "className": "rose-500", "swatch": "#f43f5e" },
+      { "name": "zinc-950", "className": "zinc-950", "swatch": "#09090b" },
+      { "name": "zinc-900", "className": "zinc-900", "swatch": "#18181b" },
+      { "name": "zinc-800", "className": "zinc-800", "swatch": "#27272a" },
+      { "name": "zinc-400", "className": "zinc-400", "swatch": "#a1a1aa" },
+      { "name": "white", "className": "white", "swatch": "#ffffff" }
+    ]
+  },
+  "stageBackgrounds": [
+    { "id": "light", "label": "Light", "name": "Light Studio Stage" },
+    { "id": "aurora", "label": "Aurora", "name": "Luminous Aurora Mesh" },
+    { "id": "grid", "label": "Grid", "name": "Blueprint Engineering Grid" },
+    { "id": "dots", "label": "Dots", "name": "Architectural Dot Matrix" },
+    { "id": "sunset", "label": "Sunset", "name": "Sunset Dusk Glow" },
+    { "id": "minimal", "label": "Dark", "name": "Minimal Dark Charcoal" }
+  ],
+  "defaultChatPrompts": [
+    "Add a pricing section with 3 tiers",
+    "Make hero headline larger and centered",
+    "Switch primary colour to cyber cyan",
+    "Add sticky navigation bar with menu"
+  ],
+  "sandboxRuntimePackages": [
+    "react",
+    "react-dom",
+    "lucide-react",
+    "framer-motion",
+    "@tabler/icons-react",
+    "@phosphor-icons/react",
+    "clsx",
+    "tailwind-merge"
+  ]
+}

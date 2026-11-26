@@ -29,6 +29,7 @@ STRICT CODE GENERATION RULES:
 1. Output strictly valid JSON matching FileGenerationOutputSchema.
 2. Export every symbol listed in exportedSymbols using exact named exports (or export default for App Router page/layout).
 3. Import from available packages (react, lucide-react, @tabler/icons-react, @phosphor-icons/react, framer-motion, clsx, tailwind-merge) or files explicitly listed in requiredContextFiles. Always use the standard Next.js "@/..." alias (e.g. import { Hero } from "@/components/Hero";), NEVER bare "src/..." or file extensions like ".tsx". Never invent an unscheduled file import.
+   NEVER import \`Link\` from "lucide-react" in a file that uses \`next/link\` or \`<Link href="...">\`; use \`Link2\` or \`ExternalLink\` for link icons instead so \`Link\` is never declared twice.
 4. SEMANTIC DESIGN TOKENS (MANDATORY FOR INSTANT RE-THEMING): Use semantic classes (bg-background, text-foreground, bg-surface, bg-primary, text-primary, border-border) instead of hardcoding bg-zinc-950 or text-white on root containers. This ensures the app adapts instantly when curated color themes (e.g. Light Studio, Cyber Cyan) are toggled.
 5. Modern visual card patterns: bento grids, glassmorphism, subtle gradient borders, and hover micro-interactions.
 6. For imagery (heroes, cards, user avatars), use realistic Unsplash URLs with query parameters (?auto=format&fit=crop&w=800).

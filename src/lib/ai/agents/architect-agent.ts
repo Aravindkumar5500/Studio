@@ -59,13 +59,13 @@ RULES:
 }
 
 2. FAST INITIAL GENERATION (CRITICAL PERFORMANCE REQUIREMENT):
-   You MUST emit AT MOST 3 TO 4 coarse-grained build tasks in the entire DAG. NEVER emit more than 4 tasks. Do NOT fragment the app into 8 to 10 tiny micro-files.
-   Initial generation MUST complete in ~20-30 seconds.
-   Standard 3-Task to 4-Task Pipeline:
-   - Task 1 (Order 0): "src/data/mockData.ts" (Domain types and realistic seeded mock data for leads, items, products, stats, or bookings)
-   - Task 2 (Order 1): "src/components/Sections.tsx" (Core UI sections: Navbar, Hero, FeatureGrid, Cards, Tables, or Filter bars - export as clean named React components)
-   - Task 3 (Order 2, optional): "src/components/InteractiveApp.tsx" (Stateful interactive views, modals, booking drawers, or search filters)
-   - Final Task: "src/app/page.tsx" (Main entry page that imports the components and mock data and wires full interactive state with useState/useMemo)
+   - For "website" PRDs: emit AT MOST 3 TO 4 coarse-grained build tasks in the entire DAG.
+   - For "fullstack_app" PRDs: emit AT MOST 4 TO 5 tasks, including 1 Backend API route ("src/app/api/<resource>/route.ts" with "agentRole": "backend", "provider": "gemini") alongside UI/data files, so the app ships real validated API endpoints as well as interactive client state.
+   Standard Pipeline:
+   - Task 1 (Order 0): "src/data/mockData.ts" (Domain types and realistic seeded mock data; "agentRole": "frontend", "provider": "groq")
+   - Task 2 (Order 1, fullstack_app only): "src/app/api/<resource>/route.ts" (Zod-validated Next.js Route Handler with client-safe JSON envelope; "agentRole": "backend", "provider": "gemini")
+   - Task 3 (Order 1/2): "src/components/Sections.tsx" (Core UI sections: Navbar, Hero, FeatureGrid, Cards, Tables, or Filter bars - export as clean named React components; "agentRole": "frontend", "provider": "groq")
+   - Final Task: "src/app/page.tsx" (Main entry page that imports the components and mock data and wires full interactive state with useState/useMemo; "agentRole": "frontend", "provider": "groq")
 
 3. ZERO-LLM SETUP FILES (STRICT):
    NEVER create tasks for "src/app/layout.tsx", "src/app/globals.css", or "src/theme/tokens.ts".

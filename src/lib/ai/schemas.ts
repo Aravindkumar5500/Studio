@@ -380,6 +380,20 @@ export const PlanRequestSchema = z.object({
   projectId: z.string().min(1),
   prompt: z.string().min(3),
   workflowMode: z.enum(["guided", "autonomous"]).default("guided"),
+  /**
+   * Paths already in the project VFS. The App Router shell is normally seeded,
+   * so the planner skips it; pass this and anything genuinely missing is
+   * planned instead. Empty means "assume the shell exists" (current behaviour).
+   */
+  existingFiles: z.array(z.string()).default([]),
+  includeBackend: z.boolean().optional(),
+});
+
+export const DatabaseRequestSchema = z.object({
+  projectId: z.string().min(1),
+  productName: z.string().min(1),
+  dataEntities: z.array(DataEntitySchema).min(1),
+  existingCollections: z.array(z.string()).default([]),
 });
 
 export const ExecuteTaskRequestSchema = z.object({

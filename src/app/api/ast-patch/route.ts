@@ -19,7 +19,7 @@ export const runtime = "nodejs";
  */
 const BodySchema = AstPatchRequestSchema.extend({
   content: z.string().optional(),
-  userId: z.string().default("me"),
+  userId: z.string().optional(),
 });
 
 export async function POST(request: Request) {
@@ -79,7 +79,7 @@ export async function POST(request: Request) {
         byteSize: size,
         exportSignatures: extractExportSignatures(content),
         imports: extractImports(content),
-        lastModifiedBy: body.userId,
+        lastModifiedBy: body.userId || auth.user.uid,
         updatedAt: nowIso(),
       };
       await db.collection(COLLECTIONS.sourceFiles).doc(docId).set(payload, { merge: true });

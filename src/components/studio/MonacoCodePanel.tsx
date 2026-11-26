@@ -3,6 +3,7 @@
 import * as React from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { useStudio } from "@/store/studio-store";
+import { useTheme } from "@/components/theme-provider";
 import { cn, formatBytes } from "@/lib/utils";
 import { MAX_FILE_BYTES } from "@/types/firestore";
 
@@ -20,16 +21,15 @@ const LANGUAGE_MAP: Record<string, string> = {
 
 export function MonacoCodePanel() {
   const studio = useStudio();
+  const { theme } = useTheme();
   const file = studio.files[studio.activeFilePath];
   const [draft, setDraft] = React.useState(file?.content ?? "");
   const dirtyRef = React.useRef(false);
   const timerRef = React.useRef<number | null>(null);
-  /** The edit waiting to be written, pinned to the file it was typed into. */
   const pendingRef = React.useRef<{ filePath: string; value: string } | null>(null);
 
   const setFileContent = studio.setFileContent;
 
-  /** Writes any outstanding edit immediately, to its own file. */
   const flush = React.useCallback(() => {
     if (timerRef.current) {
       window.clearTimeout(timerRef.current);
@@ -41,18 +41,14 @@ export function MonacoCodePanel() {
     if (pending) setFileContent(pending.filePath, pending.value);
   }, [setFileContent]);
 
-  // Switching files must commit the previous file's edit before the editor
-  // rebinds, otherwise the pending write lands on the newly opened file.
   React.useEffect(() => {
     flush();
     setDraft(studio.files[studio.activeFilePath]?.content ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studio.activeFilePath]);
 
-  // Flush on unmount so a half-typed edit is never dropped.
   React.useEffect(() => flush, [flush]);
 
-  // Keep the editor in sync when the file changes underneath us (AI / visual edits).
   React.useEffect(() => {
     const current = studio.files[studio.activeFilePath];
     if (current && current.content !== draft && !dirtyRef.current) {
@@ -93,7 +89,7 @@ export function MonacoCodePanel() {
 
   if (!file) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-slate-500">
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         Select a file in the Explorer to start editing.
       </div>
     );
@@ -102,26 +98,30 @@ export function MonacoCodePanel() {
   const oversize = file.byteSize > MAX_FILE_BYTES * 0.9;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-3 border-b border-slate-800 px-3">
-        <span className="font-mono text-xs text-slate-300">{file.filePath}</span>
-        <span className="font-mono text-[10px] text-slate-600">{file.language}</span>
+    <div className="flex h-full flex-col bg-canvas">
+      <div className="flex h-10 shrink-0 items-center gap-3 border-b border-border bg-panel px-3.5">
+        <span className="truncate font-mono text-xs font-medium text-foreground">
+          {file.filePath}
+        </span>
+        <span className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          {file.language}
+        </span>
         <span
           className={cn(
-            "ml-auto font-mono text-[10px]",
-            oversize ? "text-amber-400" : "text-slate-600",
+            "ml-auto shrink-0 font-mono text-[10px]",
+            oversize ? "text-warning" : "text-muted-foreground",
           )}
         >
           {formatBytes(file.byteSize)} / {formatBytes(MAX_FILE_BYTES)}
         </span>
-        <span className="font-mono text-[10px] text-slate-600">
+        <span className="hidden sm:inline shrink-0 font-mono text-[10px] text-muted-foreground">
           sha {file.sha256.slice(0, 8)}
         </span>
       </div>
       <div className="min-h-0 flex-1">
         <Editor
           height="100%"
-          theme="vs-dark"
+          theme={theme === "dark" ? "vs-dark" : "light"}
           path={file.filePath}
           language={LANGUAGE_MAP[file.language] ?? "plaintext"}
           value={draft}
@@ -129,7 +129,6 @@ export function MonacoCodePanel() {
           onChange={(value) => {
             dirtyRef.current = true;
             setDraft(value ?? "");
-            // Pin the write to this file, not to whatever is active in 500ms.
             commit(file.filePath, value ?? "");
           }}
           options={{

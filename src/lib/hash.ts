@@ -79,6 +79,11 @@ export function sourceFileDocId(projectId: string, filePath: string): string {
   return `${projectId}_${sha256Sync(normalizePath(filePath)).slice(0, 32)}`;
 }
 
+/** Firestore-safe document id for a version snapshot file: `${versionId}_${pathHash}`. */
+export function versionSnapshotDocId(versionId: string, filePath: string): string {
+  return `${versionId}_${sha256Sync(normalizePath(filePath)).slice(0, 32)}`;
+}
+
 export function normalizePath(filePath: string): string {
   return filePath.replace(/\\/g, "/").replace(/^\.?\//, "");
 }

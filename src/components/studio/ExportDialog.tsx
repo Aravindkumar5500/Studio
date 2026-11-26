@@ -99,14 +99,16 @@ export function ExportDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="mb-4 flex rounded-md border border-slate-800 bg-slate-950 p-0.5">
+        <div className="mb-4 flex rounded-lg border border-border bg-surface p-0.5">
           {(["zip", "github"] as const).map((id) => (
             <button
               key={id}
               type="button"
               onClick={() => setTab(id)}
-              className={`flex-1 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
-                tab === id ? "bg-slate-800 text-slate-100" : "text-slate-400 hover:text-slate-200"
+              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                tab === id
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {id === "zip" ? "Download ZIP" : "Push to GitHub"}
@@ -116,13 +118,13 @@ export function ExportDialog({
 
         {tab === "zip" ? (
           <div className="space-y-4">
-            <p className="text-xs leading-relaxed text-slate-400">
-              Bundles every source file with <span className="font-mono">package.json</span>,{" "}
-              <span className="font-mono">tsconfig.json</span>,{" "}
-              <span className="font-mono">next.config.mjs</span>,{" "}
-              <span className="font-mono">tailwind.config.ts</span> and{" "}
-              <span className="font-mono">postcss.config.mjs</span>. Run{" "}
-              <span className="font-mono">npm install && npm run dev</span> after unzipping.
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Bundles every source file with <span className="font-mono text-foreground">package.json</span>,{" "}
+              <span className="font-mono text-foreground">tsconfig.json</span>,{" "}
+              <span className="font-mono text-foreground">next.config.mjs</span>,{" "}
+              <span className="font-mono text-foreground">tailwind.config.ts</span> and{" "}
+              <span className="font-mono text-foreground">postcss.config.mjs</span>. Run{" "}
+              <span className="font-mono text-foreground">npm install &amp;&amp; npm run dev</span> after unzipping.
             </p>
             <Button onClick={handleZip} disabled={busy} className="w-full gap-2">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -160,12 +162,12 @@ export function ExportDialog({
                 placeholder="ghp_…"
               />
             </div>
-            <label className="flex items-center gap-2 text-xs text-slate-400">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
               <input
                 type="checkbox"
                 checked={isPrivate}
                 onChange={(event) => setIsPrivate(event.target.checked)}
-                className="h-3.5 w-3.5 rounded border-slate-700 bg-slate-900"
+                className="h-3.5 w-3.5 rounded border-input accent-primary"
               />
               Create the repository as private
             </label>
@@ -181,13 +183,13 @@ export function ExportDialog({
         )}
 
         {result && (
-          <p className="mt-4 flex items-start gap-2 rounded-md border border-emerald-800/60 bg-emerald-500/10 p-2.5 text-xs text-emerald-300">
+          <p className="mt-4 flex items-start gap-2 rounded-lg border border-success/30 bg-success/10 p-2.5 text-xs text-success">
             <PackageCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             {result}
           </p>
         )}
         {error && (
-          <p className="mt-4 rounded-md border border-red-800/60 bg-red-500/10 p-2.5 text-xs text-red-300">
+          <p className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive">
             {error}
           </p>
         )}

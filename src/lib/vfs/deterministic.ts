@@ -15,8 +15,15 @@ export function buildDeterministicGlobalsCss(designSystem?: DesignSystem): strin
   const bg = designSystem?.colors?.background || "#09090b";
   const fg = designSystem?.colors?.foreground || "#f8fafc";
   const primary = designSystem?.colors?.primary || "#10b981";
+  const primaryHover = designSystem?.colors?.["primary-hover"] || designSystem?.colors?.accent || "#059669";
+  const accent = designSystem?.colors?.accent || "#06b6d4";
   const surface = designSystem?.colors?.surface || "#18181b";
   const border = designSystem?.colors?.border || "#27272a";
+  const radiusSm = designSystem?.radius?.sm || "0.25rem";
+  const radiusMd = designSystem?.radius?.md || "0.5rem";
+  const radiusLg = designSystem?.radius?.lg || "0.75rem";
+  const fontSans = designSystem?.typography?.fontSans || "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif";
+  const fontMono = designSystem?.typography?.fontMono || "'JetBrains Mono', ui-monospace, monospace";
 
   return `@tailwind base;
 @tailwind components;
@@ -28,14 +35,21 @@ export function buildDeterministicGlobalsCss(designSystem?: DesignSystem): strin
     --color-foreground: ${fg};
     --color-surface: ${surface};
     --color-primary: ${primary};
+    --color-primary-hover: ${primaryHover};
+    --color-accent: ${accent};
     --color-border: ${border};
+    --radius-sm: ${radiusSm};
+    --radius-md: ${radiusMd};
+    --radius-lg: ${radiusLg};
+    --font-sans: ${fontSans};
+    --font-mono: ${fontMono};
   }
   html, body, #root {
     min-height: 100%;
   }
   body {
     margin: 0;
-    font-family: 'Geist', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
     background-color: var(--color-background, ${bg});
     color: var(--color-foreground, ${fg});
     -webkit-font-smoothing: antialiased;

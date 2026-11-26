@@ -2,7 +2,7 @@ import { validateSourceCode, repairSourceCode, validateProjectVfs } from "../app
 import { buildSandpackFiles } from "@/lib/sandpack/build-files";
 import { stampStudioIds, scanJsxElements } from "@/lib/patch/studio-id";
 import { setGroupToken } from "@/lib/patch/class-groups";
-import { SEED_FILES, SEED_DESIGN_SYSTEM } from "@/lib/vfs/seed";
+import { buildSeedProject, SEED_DESIGN_SYSTEM } from "@/lib/vfs/seed";
 import type { CodeDiagnostic, RuntimeDiagnostic } from "../domain/types";
 
 interface TestReport {
@@ -38,10 +38,11 @@ async function runEndToEndVerification() {
   // TEST 1: Studio Demo Workspace Integrity
   // -------------------------------------------------------------------------
   try {
-    const seedKeys = Object.keys(SEED_FILES);
+    const seedFiles = buildSeedProject();
+    const seedKeys = Object.keys(seedFiles);
     const hasRootPage = seedKeys.includes("src/app/page.tsx");
     const hasComponents = seedKeys.some((k) => k.startsWith("src/components/"));
-    const sandpackFiles = buildSandpackFiles(SEED_FILES, {
+    const sandpackFiles = buildSandpackFiles(seedFiles, {
       colors: SEED_DESIGN_SYSTEM.colors,
       radius: SEED_DESIGN_SYSTEM.radius,
       fontSans: SEED_DESIGN_SYSTEM.typography.fontSans,

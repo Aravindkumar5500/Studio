@@ -1,5 +1,6 @@
 import type { DesignSystem } from "@/lib/ai/schemas";
 import type { VfsMap } from "@/lib/vfs/types";
+import { isLightHexColor } from "@/lib/utils";
 
 /**
  * Builds a 100% self-contained, standalone HTML preview document
@@ -11,8 +12,7 @@ export function generateStandaloneHtmlPreview(
   designSystem?: DesignSystem,
 ): string {
   const bg = designSystem?.colors?.background || "#09090b";
-  const isLight =
-    bg === "#ffffff" || bg === "#faf8f5" || bg === "#f1f5f9" || bg === "#f8fafc";
+  const isLight = isLightHexColor(bg);
   const fg = designSystem?.colors?.foreground || (isLight ? "#0f172a" : "#fafafa");
   const primary = designSystem?.colors?.primary || "#10b981";
   const accent = designSystem?.colors?.accent || "#06b6d4";

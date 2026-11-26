@@ -178,7 +178,7 @@ export async function requireProjectAccess(
         {
           id: projectId,
           ownerId: uid,
-          name: "Studio Project",
+          name: projectId,
           slug: projectId,
           description: "AI-generated Studio application",
           status: "planning",

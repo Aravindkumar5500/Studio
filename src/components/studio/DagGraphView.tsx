@@ -11,17 +11,18 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { useStudio } from "@/store/studio-store";
+import { useTheme } from "@/components/theme-provider";
 import type { GenerationTaskDoc, TaskStatus } from "@/types/firestore";
 
-const STATUS_COLOR: Record<TaskStatus, { border: string; dot: string }> = {
-  pending: { border: "#334155", dot: "#475569" },
-  awaiting_approval: { border: "#b45309", dot: "#f59e0b" },
-  running: { border: "#4f46e5", dot: "#6366f1" },
-  validating: { border: "#0284c7", dot: "#38bdf8" },
-  repairing: { border: "#d97706", dot: "#fbbf24" },
-  succeeded: { border: "#047857", dot: "#10b981" },
-  failed: { border: "#b91c1c", dot: "#ef4444" },
-  skipped: { border: "#334155", dot: "#334155" },
+const STATUS_DOT: Record<TaskStatus, string> = {
+  pending: "#78716c",
+  awaiting_approval: "#d97706",
+  running: "#ea580c",
+  validating: "#0284c7",
+  repairing: "#d97706",
+  succeeded: "#16a34a",
+  failed: "#dc2626",
+  skipped: "#78716c",
 };
 
 /** Layers tasks by dependency depth so the DAG reads left-to-right. */
@@ -34,9 +35,10 @@ export function layoutTasks(tasks: GenerationTaskDoc[]): Node[] {
     if (seen.has(id)) return 0;
     seen.add(id);
     const task = byId.get(id);
-    const value = !task || task.dependsOn.length === 0
-      ? 0
-      : 1 + Math.max(...task.dependsOn.map((d) => depthOf(d, seen)));
+    const value =
+      !task || task.dependsOn.length === 0
+        ? 0
+        : 1 + Math.max(...task.dependsOn.map((d) => depthOf(d, seen)));
     depth.set(id, value);
     return value;
   }
@@ -48,7 +50,7 @@ export function layoutTasks(tasks: GenerationTaskDoc[]): Node[] {
     const column = depth.get(task.id) ?? 0;
     const row = perColumn.get(column) ?? 0;
     perColumn.set(column, row + 1);
-    const colors = STATUS_COLOR[task.status];
+    const dotColor = STATUS_DOT[task.status];
     return {
       id: task.id,
       position: { x: column * 280, y: row * 110 },
@@ -57,28 +59,29 @@ export function layoutTasks(tasks: GenerationTaskDoc[]): Node[] {
           <div className="w-[220px] text-left">
             <div className="flex items-center gap-1.5">
               <span
-                className="h-1.5 w-1.5 rounded-full"
-                style={{ background: colors.dot }}
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ backgroundColor: dotColor }}
               />
-              <span className="truncate text-[11px] font-semibold text-slate-100">
+              <span className="truncate text-[11px] font-semibold text-foreground">
                 {task.title}
               </span>
             </div>
-            <p className="mt-1 truncate font-mono text-[10px] text-slate-400">
+            <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
               {task.targetFilePath}
             </p>
-            <p className="mt-1 text-[10px] uppercase tracking-wide text-slate-500">
+            <p className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
               {task.agentRole} · {task.provider}
             </p>
           </div>
         ),
       },
       style: {
-        background: "#0c111d",
-        border: `1px solid ${colors.border}`,
-        borderRadius: 8,
+        background: "hsl(var(--card))",
+        border: `1px solid ${dotColor}`,
+        borderRadius: 10,
         padding: 10,
         width: 244,
+        boxShadow: "var(--shadow-card)",
       },
     } satisfies Node;
   });
@@ -93,8 +96,8 @@ export function buildEdges(tasks: GenerationTaskDoc[]): Edge[] {
         source: dep,
         target: task.id,
         animated: task.status === "running",
-        style: { stroke: "#334155" },
-        markerEnd: { type: MarkerType.ArrowClosed, color: "#334155" },
+        style: { stroke: "hsl(var(--muted-foreground))" },
+        markerEnd: { type: MarkerType.ArrowClosed, color: "#ea580c" },
       });
     }
   }
@@ -103,15 +106,16 @@ export function buildEdges(tasks: GenerationTaskDoc[]): Edge[] {
 
 export function DagGraphView() {
   const studio = useStudio();
+  const { theme } = useTheme();
   const nodes = React.useMemo(() => layoutTasks(studio.tasks), [studio.tasks]);
   const edges = React.useMemo(() => buildEdges(studio.tasks), [studio.tasks]);
 
   if (!studio.tasks.length) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-        <p className="text-sm text-slate-400">No build graph yet.</p>
-        <p className="max-w-sm text-xs text-slate-500">
-          Describe what you want to build in the chat panel. The Architect Agent will produce a
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+        <p className="text-sm font-semibold text-foreground">No build graph yet.</p>
+        <p className="max-w-sm text-xs text-muted-foreground leading-relaxed">
+          Describe what you want to build in the Copilot panel. The Architect Agent will produce a
           task DAG and it will appear here as it executes.
         </p>
       </div>
@@ -119,10 +123,15 @@ export function DagGraphView() {
   }
 
   return (
-    <div className="h-full w-full">
+    <div className="h-full w-full bg-canvas">
       <ReactFlow nodes={nodes} edges={edges} fitView proOptions={{ hideAttribution: true }}>
-        <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="#1e293b" />
-        <Controls className="!border-slate-800 !bg-panel" />
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={18}
+          size={1}
+          color={theme === "dark" ? "#312d29" : "#d6cfc5"}
+        />
+        <Controls className="!border-border !bg-card" />
       </ReactFlow>
     </div>
   );
