@@ -100,3 +100,13 @@ button,a,input,textarea { -webkit-tap-highlight-color:transparent; }
 .light .bg-\\[\\#101726\\] { background-color:#fff!important; }
 .light .text-slate-100,.light .text-slate-200,.light .text-slate-300 { color:#252927!important; }
 .light .border-slate-700\\/80 { border-color:var(--line)!important; }
+
+/* Explicit class-token selectors keep Tailwind's slash and arbitrary-value classes valid. */
+.light [class~="bg-emerald-500/10"],.light [class~="bg-emerald-500/15"],.light [class~="bg-emerald-500/20"] { background-color:rgba(185,85,53,.09)!important; }
+.light [class~="border-emerald-500/20"],.light [class~="border-emerald-500/30"],.light [class~="border-emerald-500/40"] { border-color:rgba(185,85,53,.28)!important; }
+.light [class~="text-emerald-300"],.light [class~="text-emerald-200"],.light [class~="text-emerald-400"] { color:#a84c30!important; }
+.light [class~="bg-gradient-to-r"][class*="from-emerald-500"],.light [class~="bg-gradient-to-br"][class*="from-emerald-500"] { background-image:none!important;background-color:#b95535!important; }
+.dark [class~="bg-emerald-500/10"],.dark [class~="bg-emerald-500/15"],.dark [class~="bg-emerald-500/20"] { background-color:rgba(220,121,88,.13)!important; }
+.dark [class~="text-emerald-300"],.dark [class~="text-emerald-200"] { color:#e58a6b!important; }
+.light [class~="bg-[#0b0f19]/95"],.light [class~="bg-[#0b0f19]/40"] { background-color:#f4f2ec!important; }
+.light [class~="bg-[#101726]"] { background-color:#fff!important; }
