@@ -109,7 +109,6 @@ export async function POST(request: Request) {
     }
 
     const routeFilePaths = new Set(routeRecords.map((route) => normalizePath(route.filePath)));
-    rawTasks = rawTasks.filter((task) => !isPageFile(task.targetFilePath) || routeFilePaths.has(normalizePath(task.targetFilePath)));
     const pageTasks = rawTasks.filter((task) => isPageFile(task.targetFilePath));
     const canonicalPageTasks = new Map<string, DagTaskNode>();
 
