@@ -152,6 +152,23 @@ export async function POST(request: Request) {
       return isPageFile(task.targetFilePath);
     });
 
+    // Ensure any architect-defined supporting page.tsx tasks also appear in routes
+    for (const task of rawTasks) {
+      if (!isPageFile(task.targetFilePath)) continue;
+      const normTaskFile = normalizePath(task.targetFilePath);
+      if (routeFilePaths.has(normTaskFile)) continue;
+      const derivedRoute = routeFromAppFile(task.targetFilePath);
+      if (!routePathSet.has(derivedRoute)) {
+        routePathSet.add(derivedRoute);
+        routeFilePaths.add(normTaskFile);
+        routeRecords.push({
+          path: derivedRoute,
+          filePath: task.targetFilePath,
+          purpose: task.description || task.title,
+        });
+      }
+    }
+
     // Fail closed on ambiguous DAGs instead of silently dropping nodes or edges.
     const taskIds = new Set<string>();
     const targetPaths = new Set<string>();
@@ -348,6 +365,16 @@ function appFileForRoute(route: string): string {
 
 function isPageFile(filePath: string): boolean {
   return /(^|\/)page\.[jt]sx?$/i.test(filePath.replace(/\\/g, "/"));
+}
+
+function routeFromAppFile(filePath: string): string {
+  const cleaned = filePath
+    .replace(/\\/g, "/")
+    .replace(/^\.?\//, "")
+    .replace(/^src\/app\//i, "")
+    .replace(/^app\//i, "")
+    .replace(/\/?page\.[jt]sx?$/i, "");
+  return cleaned ? `/${cleaned}` : "/";
 }
 
 function uniqueTaskId(base: string, tasks: DagTaskNode[]): string {

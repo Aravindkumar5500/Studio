@@ -100,14 +100,22 @@ PRD QUALITY RULES:
    actual user request; do not compress the scope to fit an arbitrary count.
 3. Give every feature concrete, testable acceptance criteria. Criteria must describe observable
    behavior, not vague statements such as "works correctly".
-4. Define every requested user-facing page in "pages" with a clear purpose and section breakdown.
-   Include the key interactions each section must support. Keep separate routes separate.
+4. Define a complete, realistic route map in "pages" — every requested user-facing page with a
+   clear purpose and section breakdown:
+   - Include EVERY page, module, and flow explicitly requested by the user prompt. Never omit,
+     merge, or defer a requested page or module into "outOfScope".
+   - Keep separate routes separate. No two distinct requested pages may share one route.
+   - Map detail, category, item, or profile flows to Next.js App Router dynamic routes when
+     appropriate (e.g. "/products/[productId]", "/categories/[category]", "/projects/[projectId]").
+   - Name the concrete interactions each section must support so the Architect Agent can map each
+     page and supporting component cleanly.
 5. Define core "dataEntities" and their fields — the state the app manages and, where relevant,
    persists to Firestore. Every field must be an object with name, type, required, and description.
 6. Create user stories that map to the features. Use valid featureId values that exist in "features".
 7. Keep the implementation previewable inside a browser-based React/Next.js runtime. Use realistic
    seeded sample state and mock boundaries where external services or credentials are unavailable.
    Preview constraints must not be used as a reason to omit requested functionality.
+   Only genuinely unsupported external services belong in "outOfScope".
 
 MANDATORY FINAL SELF-CHECK (perform internally before returning JSON):
 - Compare the final PRD against the original user request, not against your shortened interpretation.

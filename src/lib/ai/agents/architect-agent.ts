@@ -41,8 +41,10 @@ PLANNING RULES:
    - src/app/layout.tsx
    - src/app/globals.css
    - src/theme/tokens.ts
-9. Respect the shared Studio stack and code contract. Keep generated files cohesive and
-   comfortably below the per-file size limit; split large responsibilities across files.
+9. Respect the shared Studio stack and code contract:
+   - EVERY targetFilePath MUST start with "src/" (e.g. "src/types/...", "src/lib/repositories/...", "src/app/api/.../route.ts", "src/components/...", "src/app/.../page.tsx"). NEVER emit root-level paths like "prisma/schema.prisma" or "db/schema.ts".
+   - Use ONLY packages available in Studio (react, next, lucide-react, framer-motion, clsx, tailwind-merge, zod, firebase). Do NOT plan stores or libraries that are not installed (such as zustand, prisma, redux, or axios).
+   - Keep generated files cohesive and comfortably below the per-file size limit; split large responsibilities across files.
 10. Include all route records with exact route path, App Router file path, and purpose.
 11. Every task must specify taskId, title, description, agentRole, provider, order,
     targetFilePath, dependencies, requiredContextFiles, and exportedSymbols.
