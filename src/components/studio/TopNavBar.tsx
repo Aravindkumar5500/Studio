@@ -32,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { ViewMode, ViewportPreset, WorkflowMode } from "@/types/firestore";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const VIEW_TABS: { id: ViewMode; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "preview", label: "Preview", icon: Eye },
